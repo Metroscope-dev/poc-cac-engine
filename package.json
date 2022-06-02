@@ -1,0 +1,34 @@
+{
+  "name": "postgres-billion-rows",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "ts-node src/main.ts",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "prisma:generate": "yarn prisma generate --schema ./src/schema.prisma",
+    "prisma:migrate": "yarn prisma migrate deploy --schema ./src/schema.prisma",
+    "prisma:migrate:dev": "yarn prisma migrate dev --name init --schema ./src/schema.prisma",
+    "prisma:migrate:reset": "yarn prisma migrate reset --schema src/schema.prisma",
+    "prisma:migrate:status": "yarn prisma migrate status --schema src/schema.prisma",
+    "prettier:check": "yarn prettier --list-different \"./**/*.{js,jsx,ts,tsx,json,md,html,css}\"",
+    "prettier:fix": "yarn prettier --loglevel=warn --write \"./**/*.{js,jsx,ts,tsx,json,md,html,css}\""
+  },
+  "dependencies": {
+    "@faker-js/faker": "^7.0.1",
+    "@prisma/client": "^3.14.0",
+    "eslint": "^8.16.0",
+    "highcharts": "^10.1.0",
+    "highcharts-react": "^0.0.3",
+    "prettier": "^2.6.2",
+    "prisma": "^3.14.0",
+    "ts-node": "^10.8.0",
+    "typescript": "^4.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^17.0.35",
+    "@typescript-eslint/eslint-plugin": "^5.26.0",
+    "@typescript-eslint/parser": "^5.26.0"
+  }
+}

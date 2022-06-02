@@ -1,0 +1,138 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATASOURCE_URL")
+}
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["interactiveTransactions"]
+  binaryTargets   = ["native", "linux-musl"]
+}
+
+model User {
+  name String @id
+  css  String
+
+  graphs Graph[] //One graph per Serie
+
+  userSerieComputation UserSerieComputation[]
+  @@map("user")
+}
+
+model Serie {
+  name        String @id
+  description String
+
+  values        Value[] //One per Date
+  stats         Stats? //When calculated
+  computedSerie ComputedSerie? //Can be a ComputedSerie
+  graphs        Graph[] //One per User
+
+  dateSerieComputation DateSerieComputation[]
+  serieComputation     SerieComputation[]
+  userSerieComputation UserSerieComputation[]
+  @@map("serie")
+}
+
+model ComputedSerie {
+  serie      Serie  @relation(fields: [serie_name], references: [name])
+  serie_name String @unique
+
+  formula String
+
+  @@map("computed_serie")
+}
+
+model Value {
+  date       DateTime
+  serie      Serie    @relation(fields: [serie_name], references: [name])
+  serie_name String
+
+  number Float
+
+  outdatedAt DateTime?
+
+  @@id([date, serie_name])
+  @@index([serie_name, date])
+  @@map("value")
+}
+
+model Stats {
+  serie      Serie  @relation(fields: [serie_name], references: [name])
+  serie_name String @unique
+
+  valueCount Int
+
+  outdatedAt DateTime?
+
+  @@map("stats")
+}
+
+model Graph {
+  serie      Serie  @relation(fields: [serie_name], references: [name])
+  serie_name String
+
+  user      User   @relation(fields: [user_name], references: [name])
+  user_name String
+
+  file String
+
+  outdatedAt DateTime?
+
+  @@id([serie_name, user_name])
+  @@map("graph")
+}
+
+enum Progress {
+  WAITING
+  RUNNING
+  ERROR
+  SUCCESS
+}
+
+model SerieComputation {
+  serie      Serie  @relation(fields: [serie_name], references: [name])
+  serie_name String @unique
+
+  function_name String
+
+  inputHash  String
+  outdatedAt DateTime?
+  progress   Progress  @default(WAITING)
+  updatedAt  DateTime  @updatedAt
+
+  @@map("serie_computation")
+}
+
+model DateSerieComputation {
+  date       DateTime
+  serie      Serie    @relation(fields: [serie_name], references: [name])
+  serie_name String
+
+  function_name String
+
+  inputHash  String
+  outdatedAt DateTime?
+  progress   Progress  @default(WAITING)
+  updatedAt  DateTime  @updatedAt
+
+  @@id([date, serie_name])
+  @@map("date_serie_computation")
+}
+
+model UserSerieComputation {
+  user       User   @relation(fields: [user_name], references: [name])
+  user_name  String
+  serie      Serie  @relation(fields: [serie_name], references: [name])
+  serie_name String
+
+  function_name String
+
+  inputHash  String
+  outdatedAt DateTime?
+  progress   Progress  @default(WAITING)
+  updatedAt  DateTime  @updatedAt
+
+  @@id([user_name, serie_name])
+  @@map("user_serie_computation")
+}

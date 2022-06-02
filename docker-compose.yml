@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: timescale/timescaledb:2.5.1-pg14
+    container_name: postgres-poc-cascading
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: metroscope
+    restart: always
+    volumes:
+      - ./postgres-data:/var/lib/postgresql/data
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin-poc-cascading
+    environment:
+      PGADMIN_DEFAULT_EMAIL: root@metroscope.tech
+      PGADMIN_DEFAULT_PASSWORD: root
+    ports:
+      - "5050:80"
+    volumes:
+      - ./docker-pgadmin-servers.json:/pgadmin4/servers.json
