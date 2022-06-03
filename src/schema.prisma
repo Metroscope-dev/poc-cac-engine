@@ -11,9 +11,9 @@ generator client {
 
 model User {
   name String @id
-  css  String
 
-  graphs Graph[] //One graph per Serie
+  reportSettings String
+  reports        Report[] //One report per Serie
 
   userSerieComputation UserSerieComputation[]
   @@map("user")
@@ -26,7 +26,7 @@ model Serie {
   values        Value[] //One per Date
   stats         Stats? //When calculated
   computedSerie ComputedSerie? //Can be a ComputedSerie
-  graphs        Graph[] //One per User
+  graphs        Report[] //One per User
 
   dateSerieComputation DateSerieComputation[]
   serieComputation     SerieComputation[]
@@ -68,14 +68,14 @@ model Stats {
   @@map("stats")
 }
 
-model Graph {
+model Report {
   serie      Serie  @relation(fields: [serie_name], references: [name])
   serie_name String
 
   user      User   @relation(fields: [user_name], references: [name])
   user_name String
 
-  file String
+  content String
 
   outdatedAt DateTime?
 

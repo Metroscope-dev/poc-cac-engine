@@ -1,5 +1,24 @@
 import { Prisma } from "@prisma/client";
 
+export async function upsertUser(
+  prisma: Prisma.TransactionClient,
+  name: string,
+  reportSettings: string
+) {
+  await prisma.user.upsert({
+    where: {
+      name,
+    },
+    update: {
+      reportSettings,
+    },
+    create: {
+      name: name,
+      reportSettings,
+    },
+  });
+}
+
 export async function upsertSerie(
   prisma: Prisma.TransactionClient,
   name: string,
@@ -30,16 +49,21 @@ export async function assertSerieExists(prisma: Prisma.TransactionClient, name: 
   }
 }
 
-export async function insertValues(
+export async function upsertValues(
   prisma: Prisma.TransactionClient,
   serie_name: string,
   values: { date: Date; number: number }[]
 ) {
   await assertSerieExists(prisma, serie_name);
-  const data = values.map(v => ({ ...v, serie_name }));
-  await prisma.value.createMany({
-    data,
-  });
+  const sqlValues = values
+    .map(v => `('${v.date.toISOString()}', '${serie_name}', ${v.number})`)
+    .join(", ");
+
+  await prisma.$executeRaw`
+    INSERT INTO value (date, serie_name, number)
+    VALUES ${sqlValues}
+    ON CONFLICT (date, serie_name) DO UPDATE SET number = EXCLUDED.number;
+  `;
 }
 
 export async function upsertValue(
@@ -105,14 +129,14 @@ export async function upsertStats(
   });
 }
 
-export async function upsertGraph(
+export async function upsertReport(
   prisma: Prisma.TransactionClient,
   userName: string,
   serieName: string,
-  file: string
+  content: string
 ) {
   await assertSerieExists(prisma, serieName);
-  await prisma.graph.upsert({
+  await prisma.report.upsert({
     where: {
       serie_name_user_name: {
         user_name: userName,
@@ -120,12 +144,12 @@ export async function upsertGraph(
       },
     },
     update: {
-      file,
+      content,
     },
     create: {
       user_name: userName,
       serie_name: serieName,
-      file,
+      content,
     },
   });
 }

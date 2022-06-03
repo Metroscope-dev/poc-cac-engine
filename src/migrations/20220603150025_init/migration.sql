@@ -4,7 +4,7 @@ CREATE TYPE "Progress" AS ENUM ('WAITING', 'RUNNING', 'ERROR', 'SUCCESS');
 -- CreateTable
 CREATE TABLE "user" (
     "name" TEXT NOT NULL,
-    "css" TEXT NOT NULL,
+    "reportSettings" TEXT NOT NULL,
 
     CONSTRAINT "user_pkey" PRIMARY KEY ("name")
 );
@@ -27,8 +27,8 @@ CREATE TABLE "computed_serie" (
 CREATE TABLE "value" (
     "date" TIMESTAMP(3) NOT NULL,
     "serie_name" TEXT NOT NULL,
-    "data" DOUBLE PRECISION NOT NULL,
-    "outdatedAt" TIMESTAMP(3) NOT NULL,
+    "number" DOUBLE PRECISION NOT NULL,
+    "outdatedAt" TIMESTAMP(3),
 
     CONSTRAINT "value_pkey" PRIMARY KEY ("date","serie_name")
 );
@@ -37,50 +37,53 @@ CREATE TABLE "value" (
 CREATE TABLE "stats" (
     "serie_name" TEXT NOT NULL,
     "valueCount" INTEGER NOT NULL,
-    "outdatedAt" TIMESTAMP(3) NOT NULL
+    "outdatedAt" TIMESTAMP(3)
 );
 
 -- CreateTable
 CREATE TABLE "graph" (
     "serie_name" TEXT NOT NULL,
     "user_name" TEXT NOT NULL,
-    "file" TEXT NOT NULL,
-    "outdatedAt" TIMESTAMP(3) NOT NULL,
+    "content" TEXT NOT NULL,
+    "outdatedAt" TIMESTAMP(3),
 
     CONSTRAINT "graph_pkey" PRIMARY KEY ("serie_name","user_name")
 );
 
 -- CreateTable
-CREATE TABLE "value_computation" (
-    "date" TIMESTAMP(3) NOT NULL,
+CREATE TABLE "serie_computation" (
     "serie_name" TEXT NOT NULL,
+    "function_name" TEXT NOT NULL,
     "inputHash" TEXT NOT NULL,
-    "outdatedAt" TIMESTAMP(3) NOT NULL,
-    "progress" "Progress" NOT NULL,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
-
-    CONSTRAINT "value_computation_pkey" PRIMARY KEY ("date","serie_name")
-);
-
--- CreateTable
-CREATE TABLE "stats_computation" (
-    "serie_name" TEXT NOT NULL,
-    "inputHash" TEXT NOT NULL,
-    "outdatedAt" TIMESTAMP(3) NOT NULL,
-    "progress" "Progress" NOT NULL,
+    "outdatedAt" TIMESTAMP(3),
+    "progress" "Progress" NOT NULL DEFAULT E'WAITING',
     "updatedAt" TIMESTAMP(3) NOT NULL
 );
 
 -- CreateTable
-CREATE TABLE "graph_computation" (
+CREATE TABLE "date_serie_computation" (
+    "date" TIMESTAMP(3) NOT NULL,
     "serie_name" TEXT NOT NULL,
-    "user_name" TEXT NOT NULL,
+    "function_name" TEXT NOT NULL,
     "inputHash" TEXT NOT NULL,
-    "outdatedAt" TIMESTAMP(3) NOT NULL,
-    "progress" "Progress" NOT NULL,
+    "outdatedAt" TIMESTAMP(3),
+    "progress" "Progress" NOT NULL DEFAULT E'WAITING',
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "graph_computation_pkey" PRIMARY KEY ("serie_name","user_name")
+    CONSTRAINT "date_serie_computation_pkey" PRIMARY KEY ("date","serie_name")
+);
+
+-- CreateTable
+CREATE TABLE "user_serie_computation" (
+    "user_name" TEXT NOT NULL,
+    "serie_name" TEXT NOT NULL,
+    "function_name" TEXT NOT NULL,
+    "inputHash" TEXT NOT NULL,
+    "outdatedAt" TIMESTAMP(3),
+    "progress" "Progress" NOT NULL DEFAULT E'WAITING',
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "user_serie_computation_pkey" PRIMARY KEY ("user_name","serie_name")
 );
 
 -- CreateIndex
@@ -93,7 +96,7 @@ CREATE INDEX "value_serie_name_date_idx" ON "value"("serie_name", "date");
 CREATE UNIQUE INDEX "stats_serie_name_key" ON "stats"("serie_name");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "stats_computation_serie_name_key" ON "stats_computation"("serie_name");
+CREATE UNIQUE INDEX "serie_computation_serie_name_key" ON "serie_computation"("serie_name");
 
 -- AddForeignKey
 ALTER TABLE "computed_serie" ADD CONSTRAINT "computed_serie_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -111,13 +114,13 @@ ALTER TABLE "graph" ADD CONSTRAINT "graph_user_name_fkey" FOREIGN KEY ("user_nam
 ALTER TABLE "graph" ADD CONSTRAINT "graph_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "value_computation" ADD CONSTRAINT "value_computation_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "serie_computation" ADD CONSTRAINT "serie_computation_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "stats_computation" ADD CONSTRAINT "stats_computation_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "date_serie_computation" ADD CONSTRAINT "date_serie_computation_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "graph_computation" ADD CONSTRAINT "graph_computation_user_name_fkey" FOREIGN KEY ("user_name") REFERENCES "user"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "user_serie_computation" ADD CONSTRAINT "user_serie_computation_user_name_fkey" FOREIGN KEY ("user_name") REFERENCES "user"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "graph_computation" ADD CONSTRAINT "graph_computation_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "user_serie_computation" ADD CONSTRAINT "user_serie_computation_serie_name_fkey" FOREIGN KEY ("serie_name") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
