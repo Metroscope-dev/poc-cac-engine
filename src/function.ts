@@ -7,19 +7,19 @@ import { SerieDateScope, SerieScope, UserSerieScope } from "./operation";
 
 export async function upsertStats(scope: SerieScope, data: { valueCount: number }) {
   return prisma.$transaction(async prisma => {
-    return await db.upsertStats(prisma, scope.serieName, data.valueCount);
+    return await db.upsertStats(prisma, scope.serie_name, data.valueCount);
   });
 }
 
 export async function upsertReport(scope: UserSerieScope, data: { file: string }) {
   return prisma.$transaction(async prisma => {
-    return await db.upsertReport(prisma, scope.userName, scope.serieName, data.file);
+    return await db.upsertReport(prisma, scope.user_name, scope.serie_name, data.file);
   });
 }
 
 export async function upsertComputedValue(scope: SerieDateScope, data: { number: number }) {
   return prisma.$transaction(async prisma => {
-    return await db.upsertValue(prisma, scope.serieName, scope.date, data.number);
+    return await db.upsertValue(prisma, scope.serie_name, scope.date, data.number);
   });
 }
 
@@ -28,6 +28,6 @@ export async function upsertComputedValues(
   data: { date: Date; number: number }[]
 ) {
   return prisma.$transaction(async prisma => {
-    return await db.upsertValues(prisma, scope.serieName, data);
+    return await db.upsertValues(prisma, scope.serie_name, data);
   });
 }
