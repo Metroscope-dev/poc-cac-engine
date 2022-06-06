@@ -13,14 +13,14 @@ export type Scope = undefined | UserScope | SerieScope | SerieDateScope | UserSe
 
 export type ChangeType = "create" | "update" | "delete";
 
-abstract class Mutation<T extends Scope> {
+abstract class Scopable<T extends Scope> {
   scope: T;
   constructor(scope: T) {
     this.scope = scope;
   }
 }
 
-abstract class EntityOperation<T extends Scope> extends Mutation<T> {
+abstract class EntityOperation<T extends Scope> extends Scopable<T> {
   type: ChangeType;
   constructor(scope: T, op: ChangeType) {
     super(scope);
@@ -32,8 +32,15 @@ class UserSettingsChanged extends EntityOperation<UserScope> {}
 class ComputeSerieFormulaChanged extends EntityOperation<SerieScope> {}
 class ValueNumberChanged extends EntityOperation<SerieDateScope> {}
 class StatsCountChanged extends EntityOperation<SerieScope> {}
+class ReportContentChanged extends EntityOperation<UserSerieScope> {}
 
-abstract class FunctionInputChanged<T extends Scope> extends Mutation<T> {
+abstract class Computation<T extends Scope> extends Scopable<T> {
+  abstract functionName: string;
+  abstract entityOperation: typeof EntityOperation.constructor;
+  abstract prismaUpdateMany: (
+    prisma: Prisma.TransactionClient
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ) => (arg: { data: any; where: any }) => void;
   type: ChangeType;
   constructor(scope: T, type: ChangeType) {
     super(scope);
@@ -41,101 +48,59 @@ abstract class FunctionInputChanged<T extends Scope> extends Mutation<T> {
   }
 }
 
-class ReportFunctionInputChanged extends FunctionInputChanged<UserSerieScope> {}
-class FormulaFunctionInputChanged extends FunctionInputChanged<SerieDateScope> {}
-class StatsFunctionInputChanged extends FunctionInputChanged<SerieScope> {}
-
-export const FUNCTION_STATS = "stats";
-export const FUNCTION_FORMULA = "formula";
-export const FUNCTION_REPORT = "report";
-
-async function cascade(operation: EntityOperation<Scope>, prisma: Prisma.TransactionClient) {
-  const functionInputChanges = await computeImpactsOnFunctions(operation);
-  console.log(functionInputChanges);
+class ReportComputation extends Computation<UserSerieScope> {
+  functionName = "report";
+  entityOperation = ReportContentChanged.constructor;
+  prismaUpdateMany = (prisma: Prisma.TransactionClient) => prisma.report.updateMany;
+}
+class FormulaComputation extends Computation<SerieDateScope> {
+  functionName = "formula";
+  entityOperation = ValueNumberChanged.constructor;
+  prismaUpdateMany = (prisma: Prisma.TransactionClient) => prisma.value.updateMany;
+}
+class StatsComputation extends Computation<SerieScope> {
+  functionName = "stats";
+  entityOperation = StatsCountChanged.constructor;
+  prismaUpdateMany = (prisma: Prisma.TransactionClient) => prisma.stats.updateMany;
 }
 
-async function invalidate(
-  functionInputChange: FunctionInputChanged<Scope>,
-  prisma: Prisma.TransactionClient
+async function cascade(
+  operation: EntityOperation<Scope>,
+  prisma: Prisma.TransactionClient,
+  rootOperation = true
 ) {
-  if (functionInputChange.type === "create") return;
-  switch (functionInputChange.constructor.name) {
-    case "ReportFunctionInputChanged":
-      {
-        await invalidateReportComputations(
-          functionInputChange as ReportFunctionInputChanged,
-          prisma
-        );
-      }
-      break;
-    case "StatsFunctionInputChanged":
-      {
-        await invalidateStatsComputations(functionInputChange as StatsFunctionInputChanged, prisma);
-      }
-      break;
+  const computations = await findImpactedComputation(operation);
+  const outdatedAt = new Date();
+  for (const computation of computations) {
+    if (computation.type === "create") continue;
+    const childOperation = await outdateComputedEntities(prisma, computation, outdatedAt);
+    if (childOperation) await cascade(childOperation, prisma, false);
+    outdateComputation(prisma, computation, outdatedAt);
+  }
+
+  if (rootOperation) {
+    triggerAutoComplete(prisma, computations);
   }
 }
 
-async function invalidateStatsComputations(
-  change: StatsFunctionInputChanged,
-  prisma: Prisma.TransactionClient
+async function triggerAutoComplete(
+  prisma: Prisma.TransactionClient,
+  computations: Computation<Scope>[]
 ) {
-  const outdatedAt = new Date();
-  await prisma.stats.updateMany({
-    data: {
-      outdatedAt,
-    },
-    where: {
-      ...change.scope,
-    },
-  });
-  await prisma.serieComputation.updateMany({
-    data: {
-      outdatedAt,
-      progress: change.type === "update" ? "WAITING" : undefined,
-    },
-    where: {
-      ...change.scope,
-      function_name: FUNCTION_STATS,
-    },
-  });
-  return new StatsCountChanged(change.scope, change.type);
+  for (const computation of computations) {
+    await requestComputation(prisma, computation);
+  }
 }
 
-async function invalidateReportComputations(
-  change: ReportFunctionInputChanged,
-  prisma: Prisma.TransactionClient
-) {
-  const outdatedAt = new Date();
-  await prisma.report.updateMany({
-    data: {
-      outdatedAt,
-    },
-    where: {
-      ...change.scope,
-    },
-  });
-  await prisma.userSerieComputation.updateMany({
-    data: {
-      outdatedAt,
-      progress: change.type === "update" ? "WAITING" : undefined,
-    },
-    where: {
-      ...change.scope,
-      function_name: FUNCTION_REPORT,
-    },
-  });
-}
-
-async function computeImpactsOnFunctions(
+async function findImpactedComputation(
   operation: EntityOperation<Scope>
-): Promise<FunctionInputChanged<Scope>[]> {
-  const directImpact: FunctionInputChanged<Scope>[] = [];
+): Promise<Computation<Scope>[]> {
+  const directImpact: Computation<Scope>[] = [];
   switch (operation.constructor.name) {
     case "UserSettingsChanged":
       {
         const userOperation = operation as UserSettingsChanged;
-        const reportOperation = new ReportFunctionInputChanged(
+        const reportOperation = new ReportComputation(
           {
             user_name: userOperation.scope.user_name,
             serie_name: undefined,
@@ -147,7 +112,7 @@ async function computeImpactsOnFunctions(
       break;
     case "ComputeSerieFormulaChanged": {
       const measuredSerieOperation = operation as ComputeSerieFormulaChanged;
-      const formulaFunctionInputChanged = new FormulaFunctionInputChanged(
+      const formulaFunctionInputChanged = new FormulaComputation(
         {
           serie_name: measuredSerieOperation.scope.serie_name,
           date: undefined,
@@ -160,7 +125,7 @@ async function computeImpactsOnFunctions(
     }
     case "ValueNumberChanged": {
       const valueOperation = operation as ValueNumberChanged;
-      const formulaFunctionInputChanged = new FormulaFunctionInputChanged(
+      const formulaFunctionInputChanged = new FormulaComputation(
         {
           serie_name: undefined,
           date: valueOperation.scope.date,
@@ -169,7 +134,7 @@ async function computeImpactsOnFunctions(
       );
       directImpact.push(formulaFunctionInputChanged);
 
-      const statsFunctionInputChanged = new StatsFunctionInputChanged(
+      const statsFunctionInputChanged = new StatsComputation(
         {
           serie_name: valueOperation.scope.serie_name,
         },
@@ -181,7 +146,7 @@ async function computeImpactsOnFunctions(
     case "StatsCountChanged":
       {
         const statsOperation = operation as StatsCountChanged;
-        const reportOperation = new ReportFunctionInputChanged(
+        const reportOperation = new ReportComputation(
           {
             user_name: undefined,
             serie_name: statsOperation.scope.serie_name,
@@ -197,6 +162,54 @@ async function computeImpactsOnFunctions(
   }
 
   return directImpact;
+}
+
+async function outdateComputedEntities(
+  prisma: Prisma.TransactionClient,
+  computation: Computation<Scope>,
+  outdatedAt: Date
+) {
+  await computation.prismaUpdateMany(prisma)({
+    data: {
+      outdatedAt,
+    },
+    where: {
+      ...computation.scope,
+    },
+  });
+  return computation.entityOperation(computation.scope, "delete");
+}
+
+async function outdateComputation(
+  prisma: Prisma.TransactionClient,
+  computation: Computation<Scope>,
+  outdatedAt: Date
+) {
+  await prisma.computation.updateMany({
+    data: {
+      outdatedAt,
+    },
+    where: {
+      ...computation.scope,
+      function_name: computation.functionName,
+    },
+  });
+}
+
+async function requestComputation(
+  prisma: Prisma.TransactionClient,
+  computation: Computation<Scope>
+) {
+  await prisma.computation.updateMany({
+    data: {
+      outdatedAt: null,
+      progress: "WAITING",
+    },
+    where: {
+      ...computation.scope,
+      function_name: computation.functionName,
+    },
+  });
 }
 
 export async function createUser(data: { name: string; reportSettings: string }) {

@@ -15,7 +15,8 @@ model User {
   reportSettings String
   reports        Report[] //One report per Serie
 
-  userSerieComputation UserSerieComputation[]
+  computation Computation[]
+
   @@map("user")
 }
 
@@ -28,9 +29,8 @@ model Serie {
   computedSerie ComputedSerie? //Can be a ComputedSerie
   graphs        Report[] //One per User
 
-  dateSerieComputation DateSerieComputation[]
-  serieComputation     SerieComputation[]
-  userSerieComputation UserSerieComputation[]
+  computation Computation[]
+
   @@map("serie")
 }
 
@@ -90,9 +90,14 @@ enum Progress {
   SUCCESS
 }
 
-model SerieComputation {
-  serie      Serie  @relation(fields: [serie_name], references: [name])
-  serie_name String @unique
+model Computation {
+  id String @id
+
+  date       DateTime?
+  serie      Serie?    @relation(fields: [serie_name], references: [name])
+  serie_name String?   @unique
+  user       User?     @relation(fields: [user_name], references: [name])
+  user_name  String?
 
   function_name String
 
@@ -101,38 +106,6 @@ model SerieComputation {
   progress   Progress  @default(WAITING)
   updatedAt  DateTime  @updatedAt
 
-  @@map("serie_computation")
-}
-
-model DateSerieComputation {
-  date       DateTime
-  serie      Serie    @relation(fields: [serie_name], references: [name])
-  serie_name String
-
-  function_name String
-
-  inputHash  String
-  outdatedAt DateTime?
-  progress   Progress  @default(WAITING)
-  updatedAt  DateTime  @updatedAt
-
-  @@id([date, serie_name])
-  @@map("date_serie_computation")
-}
-
-model UserSerieComputation {
-  user       User   @relation(fields: [user_name], references: [name])
-  user_name  String
-  serie      Serie  @relation(fields: [serie_name], references: [name])
-  serie_name String
-
-  function_name String
-
-  inputHash  String
-  outdatedAt DateTime?
-  progress   Progress  @default(WAITING)
-  updatedAt  DateTime  @updatedAt
-
-  @@id([user_name, serie_name])
-  @@map("user_serie_computation")
+  @@unique([date, serie_name, user_name])
+  @@map("computation")
 }
