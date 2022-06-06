@@ -1,155 +1,257 @@
 import { Prisma } from "@prisma/client";
 
-export async function upsertUser(
+export async function createUser(
   prisma: Prisma.TransactionClient,
   name: string,
   reportSettings: string
 ) {
-  await prisma.user.upsert({
-    where: {
+  await prisma.user.create({
+    data: {
       name,
-    },
-    update: {
-      reportSettings,
-    },
-    create: {
-      name: name,
       reportSettings,
     },
   });
 }
 
-export async function upsertSerie(
+export async function updateUser(
   prisma: Prisma.TransactionClient,
   name: string,
-  description: string
+  reportSettings: string
 ) {
-  await prisma.serie.upsert({
+  await prisma.user.update({
     where: {
       name,
     },
-    update: {
-      description,
+    data: {
+      reportSettings,
     },
-    create: {
-      name: name,
+  });
+}
+
+export async function deleteUser(prisma: Prisma.TransactionClient, name: string) {
+  await prisma.user.delete({
+    where: {
+      name,
+    },
+  });
+}
+
+export async function createSerie(
+  prisma: Prisma.TransactionClient,
+  name: string,
+  description?: string
+) {
+  await prisma.serie.create({
+    data: {
+      name,
       description,
     },
   });
 }
 
-export async function assertSerieExists(prisma: Prisma.TransactionClient, name: string) {
-  const serie = await prisma.serie.findUnique({
+export async function updateSerie(
+  prisma: Prisma.TransactionClient,
+  name: string,
+  description?: string | null
+) {
+  await prisma.serie.update({
+    where: {
+      name,
+    },
+    data: {
+      description,
+    },
+  });
+}
+
+export async function deleteSerie(prisma: Prisma.TransactionClient, name: string) {
+  await prisma.serie.delete({
     where: {
       name,
     },
   });
-  if (!serie) {
-    throw new Error(`Serie ${name} doesn't exist.`);
-  }
 }
 
-export async function upsertValues(
+export async function createValues(
   prisma: Prisma.TransactionClient,
   serie_name: string,
   values: { date: Date; number: number }[]
 ) {
-  await assertSerieExists(prisma, serie_name);
-  const sqlValues = values
-    .map(v => `('${v.date.toISOString()}', '${serie_name}', ${v.number})`)
-    .join(", ");
-
-  await prisma.$executeRaw`
-    INSERT INTO value (date, serie_name, number)
-    VALUES ${sqlValues}
-    ON CONFLICT (date, serie_name) DO UPDATE SET number = EXCLUDED.number;
-  `;
+  await prisma.value.createMany({
+    data: values.map(v => ({
+      ...v,
+      serie_name,
+    })),
+  });
 }
 
-export async function upsertValue(
+export async function createValue(
   prisma: Prisma.TransactionClient,
   name: string,
   date: Date,
   number: number
 ) {
-  await assertSerieExists(prisma, name);
-  await prisma.value.upsert({
+  await prisma.value.create({
+    data: {
+      date,
+      serie_name: name,
+      number,
+    },
+  });
+}
+
+export async function updateValue(
+  prisma: Prisma.TransactionClient,
+  name: string,
+  date: Date,
+  number: number
+) {
+  await prisma.value.update({
     where: {
       date_serie_name: { date, serie_name: name },
     },
-    create: {
-      serie_name: name,
-      date,
-      number,
-    },
-    update: {
+    data: {
       number,
     },
   });
 }
 
-export async function upsertComputedSerie(
+export async function deleteValue(prisma: Prisma.TransactionClient, name: string, date: Date) {
+  await prisma.value.delete({
+    where: {
+      date_serie_name: { date, serie_name: name },
+    },
+  });
+}
+
+export async function createComputedSerie(
   prisma: Prisma.TransactionClient,
   name: string,
-  description: string,
-  formula: string
+  formula: string,
+  description?: string
 ) {
-  await upsertSerie(prisma, name, description);
-  await prisma.computedSerie.upsert({
+  await createSerie(prisma, name, description);
+  await prisma.computedSerie.create({
+    data: {
+      serie_name: name,
+      formula,
+    },
+  });
+}
+
+export async function updateComputedSerie(
+  prisma: Prisma.TransactionClient,
+  name: string,
+  formula: string,
+  description?: string | null
+) {
+  await updateSerie(prisma, name, description);
+  await prisma.computedSerie.update({
     where: {
       serie_name: name,
     },
-    update: {
-      formula,
-    },
-    create: {
-      serie_name: name,
+    data: {
       formula,
     },
   });
 }
 
-export async function upsertStats(
+export async function deleteComputedSerie(prisma: Prisma.TransactionClient, name: string) {
+  await deleteSerie(prisma, name);
+  await prisma.computedSerie.delete({
+    where: {
+      serie_name: name,
+    },
+  });
+}
+
+export async function createStats(
   prisma: Prisma.TransactionClient,
   name: string,
   valueCount: number
 ) {
-  await assertSerieExists(prisma, name);
-  await prisma.stats.upsert({
-    where: {
-      serie_name: name,
-    },
-    update: {
-      valueCount,
-    },
-    create: {
+  await prisma.stats.create({
+    data: {
       serie_name: name,
       valueCount,
     },
   });
 }
 
-export async function upsertReport(
+export async function updateStats(
+  prisma: Prisma.TransactionClient,
+  name: string,
+  valueCount: number
+) {
+  await prisma.stats.update({
+    where: {
+      serie_name: name,
+    },
+    data: {
+      valueCount,
+    },
+  });
+}
+
+export async function deleteStats(prisma: Prisma.TransactionClient, name: string) {
+  await prisma.stats.update({
+    where: {
+      serie_name: name,
+    },
+    data: {
+      outdatedAt: new Date(),
+    },
+  });
+}
+
+export async function createReport(
   prisma: Prisma.TransactionClient,
   userName: string,
   serieName: string,
   content: string
 ) {
-  await assertSerieExists(prisma, serieName);
-  await prisma.report.upsert({
+  await prisma.report.create({
+    data: {
+      user_name: userName,
+      serie_name: serieName,
+      content,
+    },
+  });
+}
+
+export async function updateReport(
+  prisma: Prisma.TransactionClient,
+  userName: string,
+  serieName: string,
+  content: string
+) {
+  await prisma.report.update({
     where: {
       serie_name_user_name: {
         user_name: userName,
         serie_name: serieName,
       },
     },
-    update: {
+    data: {
       content,
     },
-    create: {
-      user_name: userName,
-      serie_name: serieName,
-      content,
+  });
+}
+
+export async function deleteReport(
+  prisma: Prisma.TransactionClient,
+  userName: string,
+  serieName: string
+) {
+  await prisma.report.update({
+    where: {
+      serie_name_user_name: {
+        user_name: userName,
+        serie_name: serieName,
+      },
+    },
+    data: {
+      outdatedAt: new Date(),
     },
   });
 }

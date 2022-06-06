@@ -21,8 +21,8 @@ model User {
 }
 
 model Serie {
-  name        String @id
-  description String
+  name        String  @id
+  description String?
 
   values        Value[] //One per Date
   stats         Stats? //When calculated
@@ -80,7 +80,7 @@ model Report {
   outdatedAt DateTime?
 
   @@id([serie_name, user_name])
-  @@map("graph")
+  @@map("report")
 }
 
 enum Progress {
