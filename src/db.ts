@@ -72,6 +72,21 @@ export async function deleteSerie(prisma: Prisma.TransactionClient, name: string
   });
 }
 
+export async function selectValues(
+  prisma: Prisma.TransactionClient,
+  serieName: string,
+  date: Date[]
+) {
+  return await prisma.value.findMany({
+    where: {
+      serie_name: serieName,
+      date: {
+        in: date,
+      },
+    },
+  });
+}
+
 export async function createValues(
   prisma: Prisma.TransactionClient,
   serie_name: string,

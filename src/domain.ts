@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Value } from "@prisma/client";
 import {
   cascade,
   ComputedSerieFormulaChanged,
@@ -6,12 +6,7 @@ import {
   ValueNumberChanged,
 } from "./cac";
 import * as db from "./db";
-import {
-  StatsCountChanged,
-  ReportContentChanged,
-  waitingComputations,
-  FormulaComputation,
-} from "./cac";
+import { StatsCountChanged, ReportContentChanged, waitingComputations } from "./cac";
 
 const prisma = new PrismaClient();
 
@@ -29,9 +24,18 @@ export async function resetAll() {
 
 async function computationWorker() {
   const computation = waitingComputations.pop();
-  if (computation) {
-    computation.compute();
+  if (!computation) {
+    setTimeout(computationWorker, 200);
+    return;
   }
+
+  console.log(
+    `Starting computation ${computation.functionName} with scope ${JSON.stringify(
+      computation.scopeRequest
+    )}`
+  );
+  const scopes = await computation.resolveScopeSlices(prisma, computation.scopeRequest);
+  for (const scope of scopes) await computation.compute(scope);
 
   setTimeout(computationWorker, 200);
 }
@@ -71,7 +75,7 @@ export async function createValues(serieName: string, values: { date: Date; numb
 }
 
 export async function createValue(serieName: string, date: Date, number: number) {
-  const operation = new ValueNumberChanged({ serie_name: serieName, date }, "create");
+  const operation = new ValueNumberChanged({ serie_name: serieName, dates: [date] }, "create");
   return prisma.$transaction(async prisma => {
     await db.createValue(prisma, serieName, date, number);
     await cascade(operation, prisma);
@@ -79,7 +83,7 @@ export async function createValue(serieName: string, date: Date, number: number)
 }
 
 export async function update(serieName: string, date: Date, number: number) {
-  const operation = new ValueNumberChanged({ serie_name: serieName, date }, "update");
+  const operation = new ValueNumberChanged({ serie_name: serieName, dates: [date] }, "update");
   return prisma.$transaction(async prisma => {
     await db.updateValue(prisma, serieName, date, number);
     await cascade(operation, prisma);
@@ -87,7 +91,7 @@ export async function update(serieName: string, date: Date, number: number) {
 }
 
 export async function deleteValue(serieName: string, date: Date) {
-  const operation = new ValueNumberChanged({ serie_name: serieName, date }, "delete");
+  const operation = new ValueNumberChanged({ serie_name: serieName, dates: [date] }, "delete");
   return prisma.$transaction(async prisma => {
     await db.deleteValue(prisma, serieName, date);
     await cascade(operation, prisma);
@@ -173,4 +177,122 @@ export async function deleteReport(userName: string, serieName: string) {
     await db.deleteReport(prisma, userName, serieName);
     await cascade(operation, prisma);
   });
+}
+
+export async function computeReport(userName: string, serieName: string) {
+  prisma.$transaction(async prisma => {
+    const stats = await prisma.stats.findUnique({
+      where: {
+        serie_name: serieName,
+      },
+    });
+    if (!stats)
+      throw new Error(
+        `Cannot compute report ${serieName} for user ${userName} because the corresponding Stats is missing.`
+      );
+
+    const content = `Report for Mr ${userName}. The serie ${serieName} has ${stats.valueCount} values. Best regards.`;
+
+    await prisma.report.upsert({
+      where: {
+        serie_name_user_name: {
+          serie_name: serieName,
+          user_name: userName,
+        },
+      },
+      create: {
+        serie_name: serieName,
+        user_name: userName,
+        content,
+      },
+      update: {
+        content,
+      },
+    });
+  });
+}
+
+export async function computeStats(serieName: string) {
+  prisma.$transaction(async prisma => {
+    const count = await prisma.stats.count({
+      where: {
+        serie_name: serieName,
+      },
+    });
+    prisma.stats.upsert({
+      where: {
+        serie_name: serieName,
+      },
+      update: {
+        valueCount: count,
+      },
+      create: {
+        serie_name: serieName,
+        valueCount: count,
+      },
+    });
+  });
+}
+
+export async function computeFormula(serieName: string, dates: Date[]) {
+  prisma.$transaction(async prisma => {
+    const computedSerie = await prisma.computedSerie.findUnique({
+      where: {
+        serie_name: serieName,
+      },
+    });
+    if (!computedSerie)
+      throw new Error(`Cannot compute formula for missing computeSerie ${serieName}.`);
+
+    const childSerieNames = findSerieNames(computedSerie.formula);
+
+    const childrenSeriesNumbersByDate: { [key: string]: { [key: string]: number } } = {};
+    for (const childSerieName of childSerieNames) {
+      const childSerieValues = await prisma.value.findMany({
+        where: {
+          serie_name: childSerieName,
+          date: {
+            in: dates,
+          },
+        },
+      });
+      if (childSerieValues.length < dates.length)
+        throw new Error(`Some date are missing for childSerie ${childSerieName}.`);
+      const childSerieNumbers = childSerieValues.reduce<{ [key: string]: number }>((acc, next) => {
+        acc[next.date.toISOString()] = next.number;
+        return acc;
+      }, {});
+      childrenSeriesNumbersByDate[childSerieName] = childSerieNumbers;
+    }
+
+    const values: { [key: string]: number } = {};
+    for (const date of dates) {
+      values[date.toISOString()] = 0;
+      for (const childSerieName of childSerieNames) {
+        values[date.toISOString()] +=
+          childrenSeriesNumbersByDate[childSerieName]?.[date.toISOString()] ?? 0;
+      }
+    }
+
+    const sqlValues = dates
+      .map(d => `(${serieName},${d.toISOString()},${values[d.toISOString()]})`)
+      .join(",");
+
+    await prisma.$executeRaw`INSERT INTO value(serie_name,"date","number") 
+     VALUES ${sqlValues};
+    ON CONFLICT DO UPDATE SET value."number" = excluded."number"`;
+  });
+}
+
+function findSerieNames(formula: string) {
+  const re = /\$\{([^}]+)\}/g;
+  const results: string[] = [];
+  let match = null;
+  do {
+    match = re.exec(formula);
+    if (!match || !match[1]) break;
+    results.push(match[1]);
+  } while (match);
+
+  return results;
 }
