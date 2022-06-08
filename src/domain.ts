@@ -6,7 +6,6 @@ import {
   ValueNumberChanged,
   StatsCountChanged,
   ReportContentChanged,
-  waitingComputations,
 } from "./cac";
 import * as db from "./db";
 import { Sql } from "@prisma/client/runtime";
@@ -24,27 +23,6 @@ export async function resetAll() {
   await prisma.$executeRaw`delete from "user";`;
   console.log("Reseting the DB done.");
 }
-
-async function computationWorker() {
-  const task = waitingComputations.shift();
-  if (!task) {
-    setTimeout(computationWorker, 200);
-    return;
-  }
-
-  const { scope, computation } = task;
-
-  console.log(`-- ${computation.toString(scope)} starting.`);
-  await computation.compute(scope);
-  await prisma.$transaction(async prisma => {
-    await cascade(prisma, new computation.entityOperation(scope, "created"));
-  });
-  console.log(`-- ${computation.toString(scope)} done.`);
-
-  setTimeout(computationWorker, 200);
-}
-
-setTimeout(computationWorker, 5000);
 
 export async function createUser(userName: string, reportSettings: string) {
   const operation = new UserSettingsChanged({ userName }, "create");
