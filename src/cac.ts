@@ -80,7 +80,7 @@ type ComputationRequest<T extends Scope> = {
 
 export type FormulaScope = { serieName: string; dates: Date[] };
 export class FormulaComputation extends Computation<FormulaScope> {
-  functionName = "formula";
+  computationName = "formula";
   entityOperation = ValueNumberChanged;
   outdateComputedEntity = async (
     prisma: Prisma.TransactionClient,
@@ -131,7 +131,7 @@ export class FormulaComputation extends Computation<FormulaScope> {
 }
 export type StatsScope = { serieName: string };
 export class StatsComputation extends Computation<StatsScope> {
-  functionName = "stats";
+  computationName = "stats";
   entityOperation = StatsCountChanged;
   outdateComputedEntity = async (
     prisma: Prisma.TransactionClient,
@@ -157,7 +157,7 @@ export class StatsComputation extends Computation<StatsScope> {
 }
 export type ReportScope = { userName: string; serieName: string };
 export class ReportComputation extends Computation<ReportScope> {
-  functionName = "report";
+  computationName = "report";
   entityOperation = ReportContentChanged;
   outdateComputedEntity = async (
     prisma: Prisma.TransactionClient,
@@ -253,10 +253,8 @@ async function outdateComputation<T extends Scope, C extends Computation<T>>(
     where: {
       userName: scope.userName,
       serieName: scope.serieName,
-      date: {
-        in: scope.dates,
-      },
-      functionName: computation.constructor.name,
+      dates: datesAsUniqueString(scope.dates),
+      computationName: computation.constructor.name,
     },
   });
 }
@@ -269,21 +267,37 @@ async function requestComputation(
   console.log(
     `Requesting computation for ${computation.constructor.name} with scope ${JSON.stringify(scope)}`
   );
-  await prisma.computation.updateMany({
-    data: {
+  await prisma.computation.upsert({
+    create: {
+      userName: scope.userName ?? "*",
+      serieName: scope.serieName ?? "*",
+      dates: datesAsUniqueString(scope.dates),
+      computationName: computation.constructor.name,
+      outdatedAt: null,
+      progress: "WAITING",
+    },
+    update: {
       outdatedAt: null,
       progress: "WAITING",
     },
     where: {
-      userName: scope.userName,
-      serieName: scope.serieName,
-      date: {
-        in: scope.dates,
+      userName_serieName_dates_computationName: {
+        userName: scope.userName ?? "*",
+        serieName: scope.serieName ?? "*",
+        dates: datesAsUniqueString(scope.dates),
+        computationName: computation.constructor.name,
       },
-      functionName: computation.constructor.name,
     },
   });
 
   //Todo should be done in transaction.onSuccess()
   waitingComputations.push({ scope, computation });
+}
+
+function datesAsUniqueString(dates: Date[] | undefined) {
+  if (!dates) return "*";
+  return dates
+    .map(d => d.toISOString())
+    .sort()
+    .join(",");
 }

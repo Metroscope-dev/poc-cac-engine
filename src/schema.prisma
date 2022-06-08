@@ -15,8 +15,6 @@ model User {
   reportSettings String
   reports        Report[] //One report per Serie
 
-  computation Computation[]
-
   @@map("user")
 }
 
@@ -29,8 +27,6 @@ model Serie {
   computedSerie          ComputedSerie?  @relation(name: "serie") //Can be a ComputedSerie
   dependantComputedSerie ComputedSerie[] @relation(name: "dependingOnSerie")
   graphs                 Report[] //One per User
-
-  computation Computation[]
 
   @@map("serie")
 }
@@ -95,21 +91,16 @@ enum Progress {
 }
 
 model Computation {
-  id String @id
+  dates           String
+  serieName       String
+  userName        String
+  computationName String
 
-  date      DateTime?
-  serie     Serie?    @relation(fields: [serieName], references: [name])
-  serieName String?   @unique
-  user      User?     @relation(fields: [userName], references: [name])
-  userName  String?
-
-  functionName String
-
-  inputHash  String
+  inputHash  String?
   outdatedAt DateTime?
   progress   Progress  @default(WAITING)
   updatedAt  DateTime  @updatedAt
 
-  @@unique([date, serieName, userName])
+  @@id([userName, serieName, dates, computationName])
   @@map("computation")
 }

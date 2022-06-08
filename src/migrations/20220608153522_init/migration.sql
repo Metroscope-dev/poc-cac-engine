@@ -55,17 +55,16 @@ CREATE TABLE "report" (
 
 -- CreateTable
 CREATE TABLE "computation" (
-    "id" TEXT NOT NULL,
-    "date" TIMESTAMP(3),
-    "serieName" TEXT,
-    "userName" TEXT,
-    "functionName" TEXT NOT NULL,
-    "inputHash" TEXT NOT NULL,
+    "dates" TEXT NOT NULL,
+    "serieName" TEXT NOT NULL,
+    "userName" TEXT NOT NULL,
+    "computationName" TEXT NOT NULL,
+    "inputHash" TEXT,
     "outdatedAt" TIMESTAMP(3),
     "progress" "Progress" NOT NULL DEFAULT E'WAITING',
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "computation_pkey" PRIMARY KEY ("id")
+    CONSTRAINT "computation_pkey" PRIMARY KEY ("userName","serieName","dates","computationName")
 );
 
 -- CreateIndex
@@ -73,12 +72,6 @@ CREATE INDEX "value_serieName_date_idx" ON "value"("serieName", "date");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "stats_serieName_key" ON "stats"("serieName");
-
--- CreateIndex
-CREATE UNIQUE INDEX "computation_serieName_key" ON "computation"("serieName");
-
--- CreateIndex
-CREATE UNIQUE INDEX "computation_date_serieName_userName_key" ON "computation"("date", "serieName", "userName");
 
 -- AddForeignKey
 ALTER TABLE "computed_serie" ADD CONSTRAINT "computed_serie_serieName_fkey" FOREIGN KEY ("serieName") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -97,9 +90,3 @@ ALTER TABLE "report" ADD CONSTRAINT "report_userName_fkey" FOREIGN KEY ("userNam
 
 -- AddForeignKey
 ALTER TABLE "report" ADD CONSTRAINT "report_serieName_fkey" FOREIGN KEY ("serieName") REFERENCES "serie"("name") ON DELETE RESTRICT ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "computation" ADD CONSTRAINT "computation_userName_fkey" FOREIGN KEY ("userName") REFERENCES "user"("name") ON DELETE SET NULL ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "computation" ADD CONSTRAINT "computation_serieName_fkey" FOREIGN KEY ("serieName") REFERENCES "serie"("name") ON DELETE SET NULL ON UPDATE CASCADE;
