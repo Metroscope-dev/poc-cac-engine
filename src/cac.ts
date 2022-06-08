@@ -5,17 +5,21 @@ export type ChangeType = "create" | "update" | "delete";
 
 /**
  * A Scope is a composite key for uniquely identifying a set of a given entity type.
- * Ex: { user_name : "toto" } applied to User will match 1 User,
- *     { user_name : "toto", serie_name : undefined } applied to Report will match N Reports (1 report per Serie).
+ * Ex: { userName : "toto" } applied to User will match 1 User,
+ *     { userName : "toto", serieName : undefined } applied to Report will match N Reports (1 report per Serie).
  */
-export type Scope = { user_name?: string; serie_name?: string; dates?: Date[] };
+export type Scope = {
+  userName?: string;
+  serieName?: string;
+  dates?: Date[];
+};
 
 /**
  * A queue that will contain the computation that are ready to recompute.
  * This queue should be populated at startup by looking at the Computation table for rows with progress==='WAITING'.
  * Then is should be incrementally updated after each Operation.
  */
-export const waitingComputations: Computation<Scope>[] = [];
+export const waitingComputations: ComputationRequest<Scope>[] = [];
 
 /** A change of all or part of the properties of of the Entity over the multiple instances contained within the Scope  */
 abstract class EntityOperation<T extends Scope> {
@@ -27,12 +31,17 @@ abstract class EntityOperation<T extends Scope> {
     this.scope = scope;
     this.type = op;
   }
+  toString() {
+    return `${this.constructor.name}[${JSON.stringify(this.scope)}]`;
+  }
 }
 
-export class UserSettingsChanged extends EntityOperation<{ user_name: string }> {
+export class UserSettingsChanged extends EntityOperation<{ userName: string }> {
   impactedComputations = [ReportComputation];
 }
-export class ComputedSerieFormulaChanged extends EntityOperation<{ serie_name: string }> {
+export class ComputedSerieFormulaChanged extends EntityOperation<{
+  serieName: string;
+}> {
   impactedComputations = [FormulaComputation];
 }
 
@@ -49,35 +58,56 @@ export class ReportContentChanged extends EntityOperation<ReportScope> {
 }
 
 abstract class Computation<T extends Scope> {
-  scopeRequest: Scope;
-  abstract functionName: string;
   //The scope that is requested has to be
-  abstract resolveScopeSlices: (prisma: Prisma.TransactionClient, scope: Scope) => Promise<T[]>;
+  abstract computeScopes: (prisma: Prisma.TransactionClient, scopeRequest: Scope) => Promise<T[]>;
   abstract compute: (scope: T) => Promise<void>;
   abstract entityOperation: EntityOperation<T>["constructor"];
-  abstract prismaUpdateMany: (
-    prisma: Prisma.TransactionClient
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  ) => (arg: { data: any; where: any }) => void;
+  abstract outdateComputedEntity: (
+    prisma: Prisma.TransactionClient,
+    scope: T,
+    outdatedAt: Date
+  ) => Promise<void>;
 
-  constructor(scopeRequest: Scope) {
-    this.scopeRequest = scopeRequest;
+  toString(scope: T | undefined) {
+    return `${this.constructor.name}[${JSON.stringify(scope)}]`;
   }
 }
 
-export type FormulaScope = { serie_name: string; dates: Date[] };
+type ComputationRequest<T extends Scope> = {
+  scope: T;
+  computation: Computation<T>;
+};
+
+export type FormulaScope = { serieName: string; dates: Date[] };
 export class FormulaComputation extends Computation<FormulaScope> {
   functionName = "formula";
-  entityOperation = ValueNumberChanged.constructor;
-  prismaUpdateMany = (prisma: Prisma.TransactionClient) => prisma.value.updateMany;
-  resolveScopeSlices = async (prisma: Prisma.TransactionClient, scope: Scope) => {
-    if (!scope.serie_name) throw new Error("serie_name is mandatory in FormulaScope");
-    let dates: Date[] | undefined = scope.dates;
+  entityOperation = ValueNumberChanged;
+  outdateComputedEntity = async (
+    prisma: Prisma.TransactionClient,
+    scope: FormulaScope,
+    outdatedAt: Date
+  ) => {
+    await prisma.value.updateMany({
+      where: {
+        date: {
+          in: scope.dates,
+        },
+        serieName: scope.serieName,
+      },
+      data: {
+        outdatedAt,
+      },
+    });
+  };
+  computeScopes = async (prisma: Prisma.TransactionClient, scope: Scope) => {
+    const serieName = scope.serieName;
+    if (!serieName) throw new Error("serieName is mandatory in FormulaScope");
+    let dates: Date[] = scope.dates ?? [];
     if (!dates) {
       dates = (
         await prisma.value.findMany({
           where: {
-            serie_name: scope.serie_name,
+            serieName: scope.serieName,
           },
           select: {
             date: true,
@@ -85,155 +115,159 @@ export class FormulaComputation extends Computation<FormulaScope> {
         })
       ).map(o => o.date);
     }
-    return [{ dates, serie_name: scope.serie_name }];
+    const computedSeries = await prisma.computedSerie.findMany({
+      where: {
+        dependingOnSerieName: serieName,
+      },
+      select: {
+        serieName: true,
+      },
+    });
+    return computedSeries.map(cs => ({ dates, ...cs }));
   };
   compute = async (scope: FormulaScope) => {
-    await computeFormula(scope.serie_name, scope.dates);
+    await computeFormula(scope.serieName, scope.dates);
   };
-  constructor(scopeRequest: Scope) {
-    super(scopeRequest);
-  }
 }
-export type StatsScope = { serie_name: string };
+export type StatsScope = { serieName: string };
 export class StatsComputation extends Computation<StatsScope> {
   functionName = "stats";
   entityOperation = StatsCountChanged;
-  prismaUpdateMany = (prisma: Prisma.TransactionClient) => prisma.stats.updateMany;
-  resolveScopeSlices = async (_prisma: Prisma.TransactionClient, scope: Scope) => {
-    if (!scope.serie_name) throw new Error("serie_name is mandatory in StatsScope");
-    return Promise.resolve([{ serie_name: scope.serie_name }]);
+  outdateComputedEntity = async (
+    prisma: Prisma.TransactionClient,
+    scope: StatsScope,
+    outdatedAt: Date
+  ) => {
+    await prisma.stats.updateMany({
+      where: {
+        ...scope,
+      },
+      data: {
+        outdatedAt,
+      },
+    });
+  };
+  computeScopes = async (_prisma: Prisma.TransactionClient, scope: Scope) => {
+    if (!scope.serieName) throw new Error("serieName is mandatory in StatsScope");
+    return Promise.resolve([{ serieName: scope.serieName }]);
   };
   compute = async (scope: StatsScope) => {
-    await computeStats(scope.serie_name);
+    await computeStats(scope.serieName);
   };
-  constructor(scopeRequest: Scope) {
-    super(scopeRequest);
-  }
 }
-export type ReportScope = { user_name: string; serie_name: string };
+export type ReportScope = { userName: string; serieName: string };
 export class ReportComputation extends Computation<ReportScope> {
   functionName = "report";
   entityOperation = ReportContentChanged;
-  prismaUpdateMany = (prisma: Prisma.TransactionClient) => prisma.report.updateMany;
-  resolveScopeSlices = async (prisma: Prisma.TransactionClient, scope: Scope) => {
-    const serie_name = scope.serie_name;
-    const user_name = scope.user_name;
+  outdateComputedEntity = async (
+    prisma: Prisma.TransactionClient,
+    scope: ReportScope,
+    outdatedAt: Date
+  ) => {
+    await prisma.report.updateMany({
+      where: {
+        ...scope,
+      },
+      data: {
+        outdatedAt,
+      },
+    });
+  };
+  computeScopes = async (prisma: Prisma.TransactionClient, scope: Scope) => {
+    const serieName = scope.serieName;
+    const userName = scope.userName;
 
-    if (!serie_name && !user_name)
-      throw new Error("At least serie_name OR user_name is mandatory in ReportScope");
-    if (!serie_name && user_name) {
-      const serieNames = (await prisma.stats.findMany({ select: { serie_name: true } })).map(
-        o => o.serie_name
+    if (!serieName && !userName)
+      throw new Error("At least serieName OR userName is mandatory in ReportScope");
+    if (!serieName && userName) {
+      const serieNames = (await prisma.stats.findMany({ select: { serieName: true } })).map(
+        o => o.serieName
       );
-      return Promise.resolve(serieNames.map(serie_name => ({ serie_name, user_name })));
-    } else if (serie_name && !user_name) {
+      return Promise.resolve(serieNames.map(serieName => ({ serieName, userName })));
+    } else if (serieName && !userName) {
       const userNames = (await prisma.user.findMany({ select: { name: true } })).map(o => o.name);
-      return Promise.resolve(userNames.map(user_name => ({ serie_name, user_name })));
+      return Promise.resolve(userNames.map(userName => ({ serieName, userName })));
     }
     throw new Error("Should not happen.");
   };
   compute = async (scope: ReportScope) => {
-    await computeReport(scope.user_name, scope.serie_name);
+    await computeReport(scope.userName, scope.serieName);
   };
-  constructor(scopeRequest: Scope) {
-    super(scopeRequest);
-  }
 }
 
 export async function cascade(
-  operation: EntityOperation<Scope>,
   prisma: Prisma.TransactionClient,
-  rootOperation = true
+  operation: EntityOperation<Scope>,
+  depth = 1
 ) {
-  const computations = await findImpactedComputations(operation);
-
-  console.log(
-    `${rootOperation ? "Root" : "Child"}-Operation : ${
-      operation.constructor.name
-    } with scope ${JSON.stringify(operation.scope)}`
+  console.log(`${indent(depth)}Cascading ${operation.toString()}`);
+  const computations = operation.impactedComputations.map(
+    computationConstructor => new computationConstructor(operation.scope, operation.type)
   );
-  console.log(`> Impacted computations : ${computations.map(c => c.functionName)}`);
+  console.log(`${indent(depth)}\t${computations.length} impacted computations.`);
 
   const outdatedAt = new Date();
   for (const computation of computations) {
-    const childOperation = await outdateComputedEntities(prisma, computation, outdatedAt);
-    if (childOperation) await cascade(childOperation, prisma, false);
-    await outdateComputation(prisma, computation, outdatedAt);
-  }
-
-  if (rootOperation) {
-    await triggerAutoComplete(prisma, computations);
+    const scopes = await computation.computeScopes(prisma, operation.scope);
+    console.log(
+      `${indent(depth)}\t${computation.constructor.name}: ${JSON.stringify(
+        operation.scope
+      )} => ${JSON.stringify(scopes)}.`
+    );
+    for (const scope of scopes) {
+      console.log(
+        `${indent(depth)}\t${
+          computation.constructor.name
+        }: Outdating computation db entries ${computation.toString(scope)}.`
+      );
+      await outdateComputation(prisma, computation, scope, outdatedAt);
+      console.log(
+        `${indent(depth)}\t${
+          computation.constructor.name
+        }: Outdating computedEntity db entries ${computation.toString(scope)}.`
+      );
+      await computation.outdateComputedEntity(prisma, scope, outdatedAt);
+      const childOperation = new computation.entityOperation(scope, "delete");
+      if (childOperation) await cascade(prisma, childOperation, depth + 1);
+      if (depth === 1) {
+        await requestComputation(prisma, computation, scope);
+      }
+    }
   }
 }
 
-async function triggerAutoComplete(
+function indent(depth: number) {
+  return "\t".repeat(depth);
+}
+
+async function outdateComputation<T extends Scope, C extends Computation<T>>(
   prisma: Prisma.TransactionClient,
-  computations: Computation<Scope>[]
-) {
-  for (const computation of computations) {
-    await requestComputation(prisma, computation);
-  }
-}
-
-async function findImpactedComputations(
-  operation: EntityOperation<Scope>
-): Promise<Computation<Scope>[]> {
-  const impactedComputations: Computation<Scope>[] = [];
-  for (const computationConstructor of operation.impactedComputations) {
-    const computation = new computationConstructor(operation.scope, operation.type);
-    impactedComputations.push(computation);
-  }
-  return impactedComputations;
-}
-
-async function outdateComputedEntities(
-  prisma: Prisma.TransactionClient,
-  computation: Computation<Scope>,
+  computation: C,
+  scope: T,
   outdatedAt: Date
 ) {
-  console.log(
-    `Outdating ${computation.entityOperation.name} with scope ${JSON.stringify(
-      computation.scopeRequest
-    )}`
-  );
-  await computation.prismaUpdateMany(prisma)({
-    data: {
-      outdatedAt,
-    },
-    where: {
-      ...computation.scopeRequest,
-    },
-  });
-  return computation.entityOperation(computation.scopeRequest, "delete");
-}
-
-async function outdateComputation(
-  prisma: Prisma.TransactionClient,
-  computation: Computation<Scope>,
-  outdatedAt: Date
-) {
-  console.log(
-    `Outdating ${computation.functionName} with scope ${JSON.stringify(computation.scopeRequest)}`
-  );
   await prisma.computation.updateMany({
     data: {
       outdatedAt,
     },
     where: {
-      ...computation.scopeRequest,
-      function_name: computation.functionName,
+      userName: scope.userName,
+      serieName: scope.serieName,
+      date: {
+        in: scope.dates,
+      },
+      functionName: computation.constructor.name,
     },
   });
 }
 
 async function requestComputation(
   prisma: Prisma.TransactionClient,
-  computation: Computation<Scope>
+  computation: Computation<Scope>,
+  scope: Scope
 ) {
   console.log(
-    `Requesting computation for ${computation.functionName} with scope ${JSON.stringify(
-      computation.scopeRequest
-    )}`
+    `Requesting computation for ${computation.constructor.name} with scope ${JSON.stringify(scope)}`
   );
   await prisma.computation.updateMany({
     data: {
@@ -241,11 +275,15 @@ async function requestComputation(
       progress: "WAITING",
     },
     where: {
-      ...computation.scopeRequest,
-      function_name: computation.functionName,
+      userName: scope.userName,
+      serieName: scope.serieName,
+      date: {
+        in: scope.dates,
+      },
+      functionName: computation.constructor.name,
     },
   });
 
-  //Todo should be on post transaction success
-  waitingComputations.push(computation);
+  //Todo should be done in transaction.onSuccess()
+  waitingComputations.push({ scope, computation });
 }

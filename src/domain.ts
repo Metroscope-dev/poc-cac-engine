@@ -1,12 +1,15 @@
-import { PrismaClient, Value } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 import {
   cascade,
   ComputedSerieFormulaChanged,
   UserSettingsChanged,
   ValueNumberChanged,
+  StatsCountChanged,
+  ReportContentChanged,
+  waitingComputations,
 } from "./cac";
 import * as db from "./db";
-import { StatsCountChanged, ReportContentChanged, waitingComputations } from "./cac";
+import { Sql } from "@prisma/client/runtime";
 
 const prisma = new PrismaClient();
 
@@ -23,38 +26,39 @@ export async function resetAll() {
 }
 
 async function computationWorker() {
-  const computation = waitingComputations.pop();
-  if (!computation) {
+  const task = waitingComputations.shift();
+  if (!task) {
     setTimeout(computationWorker, 200);
     return;
   }
 
-  console.log(
-    `Starting computation ${computation.functionName} with scope ${JSON.stringify(
-      computation.scopeRequest
-    )}`
-  );
-  const scopes = await computation.resolveScopeSlices(prisma, computation.scopeRequest);
-  for (const scope of scopes) await computation.compute(scope);
+  const { scope, computation } = task;
+
+  console.log(`-- ${computation.toString(scope)} starting.`);
+  await computation.compute(scope);
+  await prisma.$transaction(async prisma => {
+    await cascade(prisma, new computation.entityOperation(scope, "created"));
+  });
+  console.log(`-- ${computation.toString(scope)} done.`);
 
   setTimeout(computationWorker, 200);
 }
 
 setTimeout(computationWorker, 5000);
 
-export async function createUser(name: string, reportSettings: string) {
-  const operation = new UserSettingsChanged({ user_name: name }, "create");
+export async function createUser(userName: string, reportSettings: string) {
+  const operation = new UserSettingsChanged({ userName }, "create");
   return prisma.$transaction(async prisma => {
-    await db.createUser(prisma, name, reportSettings);
-    await cascade(operation, prisma);
+    await db.createUser(prisma, userName, reportSettings);
+    await cascade(prisma, operation);
   });
 }
 
-export async function deleteUser(name: string) {
-  const operation = new UserSettingsChanged({ user_name: name }, "delete");
+export async function deleteUser(userName: string) {
+  const operation = new UserSettingsChanged({ userName }, "delete");
   return prisma.$transaction(async prisma => {
-    await db.deleteUser(prisma, name);
-    await cascade(operation, prisma);
+    await db.deleteUser(prisma, userName);
+    await cascade(prisma, operation);
   });
 }
 
@@ -66,116 +70,112 @@ export async function createSerie(serieName: string, description: string) {
 }
 
 export async function createValues(serieName: string, values: { date: Date; number: number }[]) {
-  const scope = { serie_name: serieName, dates: values.map(v => v.date) };
+  const scope = { serieName, dates: values.map(v => v.date) };
   const operation = new ValueNumberChanged(scope, "create");
   return prisma.$transaction(async prisma => {
     await db.createValues(prisma, serieName, values);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function createValue(serieName: string, date: Date, number: number) {
-  const operation = new ValueNumberChanged({ serie_name: serieName, dates: [date] }, "create");
+  const operation = new ValueNumberChanged({ serieName, dates: [date] }, "create");
   return prisma.$transaction(async prisma => {
     await db.createValue(prisma, serieName, date, number);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function update(serieName: string, date: Date, number: number) {
-  const operation = new ValueNumberChanged({ serie_name: serieName, dates: [date] }, "update");
+  const operation = new ValueNumberChanged({ serieName, dates: [date] }, "update");
   return prisma.$transaction(async prisma => {
     await db.updateValue(prisma, serieName, date, number);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function deleteValue(serieName: string, date: Date) {
-  const operation = new ValueNumberChanged({ serie_name: serieName, dates: [date] }, "delete");
+  const operation = new ValueNumberChanged({ serieName, dates: [date] }, "delete");
   return prisma.$transaction(async prisma => {
     await db.deleteValue(prisma, serieName, date);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
-export async function createComputedSerie(serieName: string, description: string, formula: string) {
-  const operation = new ComputedSerieFormulaChanged({ serie_name: serieName }, "create");
+export async function createComputedSerie(
+  serieName: string,
+  description: string,
+  formula: string,
+  dependingOnSerieName: string
+) {
+  const operation = new ComputedSerieFormulaChanged({ serieName }, "create");
   return prisma.$transaction(async prisma => {
-    await db.createComputedSerie(prisma, serieName, formula, description);
-    await cascade(operation, prisma);
+    await db.createComputedSerie(prisma, serieName, dependingOnSerieName, formula, description);
+    await cascade(prisma, operation);
   });
 }
 
 export async function updateComputedSerieFormula(serieName: string, formula: string) {
-  const operation = new ComputedSerieFormulaChanged({ serie_name: serieName }, "update");
+  const operation = new ComputedSerieFormulaChanged({ serieName }, "update");
   return prisma.$transaction(async prisma => {
     await db.updateComputedSerie(prisma, serieName, formula, undefined);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function deleteComputedSerie(serieName: string) {
-  const operation = new ComputedSerieFormulaChanged({ serie_name: serieName }, "delete");
+  const operation = new ComputedSerieFormulaChanged({ serieName }, "delete");
   return prisma.$transaction(async prisma => {
     await db.deleteComputedSerie(prisma, serieName);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function createStats(serieName: string, valueCount: number) {
-  const operation = new StatsCountChanged({ serie_name: serieName }, "create");
+  const operation = new StatsCountChanged({ serieName }, "create");
   return prisma.$transaction(async prisma => {
     await db.createStats(prisma, serieName, valueCount);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function updateStats(serieName: string, valueCount: number) {
-  const operation = new StatsCountChanged({ serie_name: serieName }, "update");
+  const operation = new StatsCountChanged({ serieName }, "update");
   return prisma.$transaction(async prisma => {
     await db.updateStats(prisma, serieName, valueCount);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function deleteStats(serieName: string) {
-  const operation = new StatsCountChanged({ serie_name: serieName }, "delete");
+  const operation = new StatsCountChanged({ serieName }, "delete");
   return prisma.$transaction(async prisma => {
     await db.deleteStats(prisma, serieName);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function createReport(userName: string, serieName: string, file: string) {
-  const operation = new ReportContentChanged(
-    { user_name: userName, serie_name: serieName },
-    "create"
-  );
+  const operation = new ReportContentChanged({ userName, serieName }, "create");
   return prisma.$transaction(async prisma => {
     await db.createReport(prisma, userName, serieName, file);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function updateReport(userName: string, serieName: string, file: string) {
-  const operation = new ReportContentChanged(
-    { user_name: userName, serie_name: serieName },
-    "update"
-  );
+  const operation = new ReportContentChanged({ userName, serieName }, "update");
   return prisma.$transaction(async prisma => {
     await db.updateReport(prisma, userName, serieName, file);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
 export async function deleteReport(userName: string, serieName: string) {
-  const operation = new ReportContentChanged(
-    { user_name: userName, serie_name: serieName },
-    "delete"
-  );
+  const operation = new ReportContentChanged({ userName, serieName }, "delete");
   return prisma.$transaction(async prisma => {
     await db.deleteReport(prisma, userName, serieName);
-    await cascade(operation, prisma);
+    await cascade(prisma, operation);
   });
 }
 
@@ -183,7 +183,7 @@ export async function computeReport(userName: string, serieName: string) {
   prisma.$transaction(async prisma => {
     const stats = await prisma.stats.findUnique({
       where: {
-        serie_name: serieName,
+        serieName,
       },
     });
     if (!stats)
@@ -195,14 +195,14 @@ export async function computeReport(userName: string, serieName: string) {
 
     await prisma.report.upsert({
       where: {
-        serie_name_user_name: {
-          serie_name: serieName,
-          user_name: userName,
+        serieName_userName: {
+          serieName,
+          userName,
         },
       },
       create: {
-        serie_name: serieName,
-        user_name: userName,
+        serieName,
+        userName,
         content,
       },
       update: {
@@ -214,20 +214,20 @@ export async function computeReport(userName: string, serieName: string) {
 
 export async function computeStats(serieName: string) {
   prisma.$transaction(async prisma => {
-    const count = await prisma.stats.count({
+    const count = await prisma.value.count({
       where: {
-        serie_name: serieName,
+        serieName,
       },
     });
-    prisma.stats.upsert({
+    await prisma.stats.upsert({
       where: {
-        serie_name: serieName,
+        serieName,
       },
       update: {
         valueCount: count,
       },
       create: {
-        serie_name: serieName,
+        serieName,
         valueCount: count,
       },
     });
@@ -238,7 +238,7 @@ export async function computeFormula(serieName: string, dates: Date[]) {
   prisma.$transaction(async prisma => {
     const computedSerie = await prisma.computedSerie.findUnique({
       where: {
-        serie_name: serieName,
+        serieName,
       },
     });
     if (!computedSerie)
@@ -250,7 +250,7 @@ export async function computeFormula(serieName: string, dates: Date[]) {
     for (const childSerieName of childSerieNames) {
       const childSerieValues = await prisma.value.findMany({
         where: {
-          serie_name: childSerieName,
+          serieName: childSerieName,
           date: {
             in: dates,
           },
@@ -275,12 +275,16 @@ export async function computeFormula(serieName: string, dates: Date[]) {
     }
 
     const sqlValues = dates
-      .map(d => `(${serieName},${d.toISOString()},${values[d.toISOString()]})`)
+      .map(d => `('${serieName}','${d.toISOString()}',${values[d.toISOString()]})`)
       .join(",");
 
-    await prisma.$executeRaw`INSERT INTO value(serie_name,"date","number") 
-     VALUES ${sqlValues};
-    ON CONFLICT DO UPDATE SET value."number" = excluded."number"`;
+    const sql = `INSERT INTO "value"("serieName","date","number") 
+    VALUES${sqlValues}
+    ON CONFLICT("serieName","date") DO UPDATE SET "number" = excluded."number";`;
+
+    console.log(sql);
+
+    await prisma.$executeRaw(new Sql([sql], []));
   });
 }
 

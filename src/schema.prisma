@@ -24,10 +24,11 @@ model Serie {
   name        String  @id
   description String?
 
-  values        Value[] //One per Date
-  stats         Stats? //When calculated
-  computedSerie ComputedSerie? //Can be a ComputedSerie
-  graphs        Report[] //One per User
+  values                 Value[] //One per Date
+  stats                  Stats? //When calculated
+  computedSerie          ComputedSerie?  @relation(name: "serie") //Can be a ComputedSerie
+  dependantComputedSerie ComputedSerie[] @relation(name: "dependingOnSerie")
+  graphs                 Report[] //One per User
 
   computation Computation[]
 
@@ -35,8 +36,11 @@ model Serie {
 }
 
 model ComputedSerie {
-  serie      Serie  @relation(fields: [serie_name], references: [name])
-  serie_name String @unique
+  serie     Serie  @relation(name: "serie", fields: [serieName], references: [name])
+  serieName String @id
+
+  dependingOnSerie     Serie  @relation(name: "dependingOnSerie", fields: [dependingOnSerieName], references: [name])
+  dependingOnSerieName String
 
   formula String
 
@@ -44,22 +48,22 @@ model ComputedSerie {
 }
 
 model Value {
-  date       DateTime
-  serie      Serie    @relation(fields: [serie_name], references: [name])
-  serie_name String
+  date      DateTime
+  serie     Serie    @relation(fields: [serieName], references: [name])
+  serieName String
 
   number Float
 
   outdatedAt DateTime?
 
-  @@id([date, serie_name])
-  @@index([serie_name, date])
+  @@id([date, serieName])
+  @@index([serieName, date])
   @@map("value")
 }
 
 model Stats {
-  serie      Serie  @relation(fields: [serie_name], references: [name])
-  serie_name String @unique
+  serie     Serie  @relation(fields: [serieName], references: [name])
+  serieName String @unique
 
   valueCount Int
 
@@ -69,17 +73,17 @@ model Stats {
 }
 
 model Report {
-  serie      Serie  @relation(fields: [serie_name], references: [name])
-  serie_name String
+  serie     Serie  @relation(fields: [serieName], references: [name])
+  serieName String
 
-  user      User   @relation(fields: [user_name], references: [name])
-  user_name String
+  user     User   @relation(fields: [userName], references: [name])
+  userName String
 
   content String
 
   outdatedAt DateTime?
 
-  @@id([serie_name, user_name])
+  @@id([serieName, userName])
   @@map("report")
 }
 
@@ -93,19 +97,19 @@ enum Progress {
 model Computation {
   id String @id
 
-  date       DateTime?
-  serie      Serie?    @relation(fields: [serie_name], references: [name])
-  serie_name String?   @unique
-  user       User?     @relation(fields: [user_name], references: [name])
-  user_name  String?
+  date      DateTime?
+  serie     Serie?    @relation(fields: [serieName], references: [name])
+  serieName String?   @unique
+  user      User?     @relation(fields: [userName], references: [name])
+  userName  String?
 
-  function_name String
+  functionName String
 
   inputHash  String
   outdatedAt DateTime?
   progress   Progress  @default(WAITING)
   updatedAt  DateTime  @updatedAt
 
-  @@unique([date, serie_name, user_name])
+  @@unique([date, serieName, userName])
   @@map("computation")
 }

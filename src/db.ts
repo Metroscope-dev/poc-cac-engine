@@ -79,7 +79,7 @@ export async function selectValues(
 ) {
   return await prisma.value.findMany({
     where: {
-      serie_name: serieName,
+      serieName,
       date: {
         in: date,
       },
@@ -89,13 +89,13 @@ export async function selectValues(
 
 export async function createValues(
   prisma: Prisma.TransactionClient,
-  serie_name: string,
+  serieName: string,
   values: { date: Date; number: number }[]
 ) {
   await prisma.value.createMany({
     data: values.map(v => ({
       ...v,
-      serie_name,
+      serieName,
     })),
   });
 }
@@ -109,7 +109,7 @@ export async function createValue(
   await prisma.value.create({
     data: {
       date,
-      serie_name: name,
+      serieName: name,
       number,
     },
   });
@@ -123,7 +123,7 @@ export async function updateValue(
 ) {
   await prisma.value.update({
     where: {
-      date_serie_name: { date, serie_name: name },
+      date_serieName: { date, serieName: name },
     },
     data: {
       number,
@@ -134,21 +134,23 @@ export async function updateValue(
 export async function deleteValue(prisma: Prisma.TransactionClient, name: string, date: Date) {
   await prisma.value.delete({
     where: {
-      date_serie_name: { date, serie_name: name },
+      date_serieName: { date, serieName: name },
     },
   });
 }
 
 export async function createComputedSerie(
   prisma: Prisma.TransactionClient,
-  name: string,
+  serieName: string,
+  dependingOnSerieName: string,
   formula: string,
   description?: string
 ) {
-  await createSerie(prisma, name, description);
+  await createSerie(prisma, serieName, description);
   await prisma.computedSerie.create({
     data: {
-      serie_name: name,
+      serieName,
+      dependingOnSerieName,
       formula,
     },
   });
@@ -163,7 +165,7 @@ export async function updateComputedSerie(
   await updateSerie(prisma, name, description);
   await prisma.computedSerie.update({
     where: {
-      serie_name: name,
+      serieName: name,
     },
     data: {
       formula,
@@ -175,7 +177,7 @@ export async function deleteComputedSerie(prisma: Prisma.TransactionClient, name
   await deleteSerie(prisma, name);
   await prisma.computedSerie.delete({
     where: {
-      serie_name: name,
+      serieName: name,
     },
   });
 }
@@ -187,7 +189,7 @@ export async function createStats(
 ) {
   await prisma.stats.create({
     data: {
-      serie_name: name,
+      serieName: name,
       valueCount,
     },
   });
@@ -200,7 +202,7 @@ export async function updateStats(
 ) {
   await prisma.stats.update({
     where: {
-      serie_name: name,
+      serieName: name,
     },
     data: {
       valueCount,
@@ -211,7 +213,7 @@ export async function updateStats(
 export async function deleteStats(prisma: Prisma.TransactionClient, name: string) {
   await prisma.stats.update({
     where: {
-      serie_name: name,
+      serieName: name,
     },
     data: {
       outdatedAt: new Date(),
@@ -227,8 +229,8 @@ export async function createReport(
 ) {
   await prisma.report.create({
     data: {
-      user_name: userName,
-      serie_name: serieName,
+      userName: userName,
+      serieName: serieName,
       content,
     },
   });
@@ -242,9 +244,9 @@ export async function updateReport(
 ) {
   await prisma.report.update({
     where: {
-      serie_name_user_name: {
-        user_name: userName,
-        serie_name: serieName,
+      serieName_userName: {
+        userName: userName,
+        serieName: serieName,
       },
     },
     data: {
@@ -260,9 +262,9 @@ export async function deleteReport(
 ) {
   await prisma.report.update({
     where: {
-      serie_name_user_name: {
-        user_name: userName,
-        serie_name: serieName,
+      serieName_userName: {
+        userName: userName,
+        serieName: serieName,
       },
     },
     data: {
