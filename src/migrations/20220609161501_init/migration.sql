@@ -54,7 +54,7 @@ CREATE TABLE "report" (
 );
 
 -- CreateTable
-CREATE TABLE "computation" (
+CREATE TABLE "computation_task" (
     "dates" TEXT NOT NULL,
     "serieName" TEXT NOT NULL,
     "userName" TEXT NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE "computation" (
     "progress" "Progress" NOT NULL DEFAULT E'WAITING',
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
-    CONSTRAINT "computation_pkey" PRIMARY KEY ("userName","serieName","dates","computationName")
+    CONSTRAINT "computation_task_pkey" PRIMARY KEY ("userName","serieName","dates","computationName")
 );
 
 -- CreateIndex

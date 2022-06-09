@@ -91,7 +91,7 @@ enum Progress {
   OUTDATED
 }
 
-model Computation {
+model ComputationTask {
   dates           String
   serieName       String
   userName        String
@@ -103,5 +103,5 @@ model Computation {
   updatedAt  DateTime  @updatedAt
 
   @@id([userName, serieName, dates, computationName])
-  @@map("computation")
+  @@map("computation_task")
 }

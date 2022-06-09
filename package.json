@@ -19,6 +19,7 @@
     "@faker-js/faker": "^7.0.1",
     "@prisma/client": "^3.14.0",
     "eslint": "^8.16.0",
+    "fast-json-stable-stringify": "^2.1.0",
     "highcharts": "^10.1.0",
     "highcharts-react": "^0.0.3",
     "prettier": "^2.6.2",
