@@ -1,6 +1,7 @@
-import { Prisma, PrismaClient, Progress, Value } from "@prisma/client";
+import { ComputationTask, Prisma, PrismaClient, Progress } from "@prisma/client";
 import stringify from "fast-json-stable-stringify";
-import * as crypto from "crypto";
+
+const prisma = new PrismaClient();
 
 export type OperationType = "create" | "update" | "delete";
 
@@ -59,11 +60,6 @@ export abstract class Computation<ComputationScope extends Scope, Input, Output>
     return `${this.constructor.name}[${JSON.stringify(scope)}]`;
   }
 }
-
-type ComputationRequest<T extends Scope, Input, Output> = {
-  scope: T;
-  computation: Computation<T, Input, Output>;
-};
 
 export async function cascade(
   prisma: Prisma.TransactionClient,
@@ -130,26 +126,22 @@ async function requestComputationTask(
   scope: Scope
 ) {
   await dbUpsertComputationTask(prisma, computation, scope, null, Progress.WAITING, null);
-  //Todo should be done in transaction.onSuccess()
-  waitingComputationTasks.push({ scope, computation });
 }
 
-async function findExistingComputationTask(
+export async function findExistingComputationTask(
   prisma: Prisma.TransactionClient,
   computation: Computation<Scope, any, any>,
   scope: Scope
 ) {
   return await prisma.computationTask.findFirst({
     where: {
-      userName: scope.userName ?? "*",
-      serieName: scope.serieName ?? "*",
-      dates: datesAsUniqueString(scope.dates) ?? "*",
+      ...serializeScope(scope),
       computationName: computation.constructor.name,
     },
   });
 }
 
-async function dbUpsertComputationTask(
+export async function dbUpsertComputationTask(
   prisma: Prisma.TransactionClient,
   computation: Computation<Scope, any, any>,
   scope: Scope,
@@ -157,11 +149,10 @@ async function dbUpsertComputationTask(
   progress: Progress,
   inputHash: string | null
 ) {
+  const serializedScope = serializeScope(scope);
   await prisma.computationTask.upsert({
     create: {
-      userName: scope.userName ?? "*",
-      serieName: scope.serieName ?? "*",
-      dates: datesAsUniqueString(scope.dates) ?? "*",
+      ...serializedScope,
       computationName: computation.constructor.name,
       outdatedAt,
       progress,
@@ -174,85 +165,61 @@ async function dbUpsertComputationTask(
     },
     where: {
       userName_serieName_dates_computationName: {
-        userName: scope.userName ?? "*",
-        serieName: scope.serieName ?? "*",
-        dates: datesAsUniqueString(scope.dates) ?? "*",
+        ...serializedScope,
         computationName: computation.constructor.name,
       },
     },
   });
 }
 
-function datesAsUniqueString(dates: Date[] | undefined) {
-  if (!dates) return undefined;
-  return dates
-    .map(d => d.toISOString())
-    .sort()
-    .join(",");
-}
-
-function hash(object: any) {
-  return crypto.createHash("md5").update(stringify(object)).digest("hex");
-}
-
-/**
- * A queue that will contain the computation that are ready to recompute.
- * This queue should be populated at startup by looking at the Computation table for rows with progress==='WAITING'.
- * Then is should be incrementally updated after each Operation.
- */
-export const waitingComputationTasks: ComputationRequest<Scope, any, any>[] = [];
-const prisma = new PrismaClient();
-
-async function computationWorker() {
-  const task = waitingComputationTasks.shift();
-  if (!task) {
-    setTimeout(computationWorker, 200);
-    return;
-  }
-
-  const { scope, computation } = task;
-
-  console.log(`-- ${computation.taskDescription(scope)} starting.`);
-
-  const input = await computation.findInput(prisma, scope);
-  const inputHash = hash(input);
-  const existingTask = await findExistingComputationTask(prisma, computation, scope);
-  if (existingTask && existingTask.inputHash === inputHash) {
+export async function computationSuccess<Output>(
+  computation: Computation<Scope, any, Output>,
+  scope: Scope,
+  inputHash: string,
+  output: Output
+) {
+  return await prisma.$transaction(async prisma => {
+    await computation.saveOutput(prisma, output);
+    //TODO on doit check le hash d'origine qui revient avec l'output
+    //et s'en servir comme d'un optimistic lock
+    const existingTask = await findExistingComputationTask(prisma, computation, scope);
+    if (existingTask?.inputHash !== inputHash) {
+      return false;
+    }
     await dbUpsertComputationTask(prisma, computation, scope, null, Progress.SUCCESS, inputHash);
-    console.log(`-- ${computation.taskDescription(scope)} success (ALREADY PRESENT).`);
-  } else {
-    await dbUpsertComputationTask(prisma, computation, scope, null, Progress.RUNNING, inputHash);
-    computation
-      .compute(input)
-      .then(async output => {
-        prisma.$transaction(async prisma => {
-          await computation.saveOutput(prisma, output);
-          await dbUpsertComputationTask(
-            prisma,
-            computation,
-            scope,
-            null,
-            Progress.SUCCESS,
-            inputHash
-          );
-          await cascade(prisma, new computation.computedEntityOperation(scope, "created"));
-          console.log(`-- ${computation.taskDescription(scope)} success.`);
-        });
-      })
-      .catch(async error => {
-        await dbUpsertComputationTask(
-          prisma,
-          computation,
-          scope,
-          new Date(),
-          Progress.ERROR,
-          inputHash
-        );
-        console.error(`Computation failed for task ${computation.taskDescription(scope)}.`, error);
-      });
-  }
-
-  setTimeout(computationWorker, 200);
+    await cascade(prisma, new computation.computedEntityOperation(scope, "created"));
+    return true;
+  });
 }
 
-setTimeout(computationWorker, 5000);
+export async function computationError(
+  computation: Computation<Scope, any, any>,
+  scope: Scope,
+  inputHash: string,
+  error: unknown
+) {
+  await dbUpsertComputationTask(prisma, computation, scope, new Date(), Progress.ERROR, inputHash);
+  console.error(`Computation failed for task ${computation.taskDescription(scope)}.`, error);
+}
+
+export function unserializeScope(task: ComputationTask) {
+  const scope: Scope = {
+    userName: task.userName === "*" ? undefined : task.userName,
+    serieName: task.serieName === "*" ? undefined : task.serieName,
+    dates: task.dates === "*" ? undefined : parseJsonDates(task.dates),
+  };
+  return scope;
+}
+
+function serializeScope(scope: Scope) {
+  return {
+    userName: scope.userName ?? "*",
+    serieName: scope.serieName ?? "*",
+    dates: scope.dates ? stringify(scope.dates) : "*",
+  };
+}
+
+function parseJsonDates(dates: string) {
+  const stringDates = JSON.parse(dates) as string[];
+  return stringDates.map(d => new Date(d));
+}

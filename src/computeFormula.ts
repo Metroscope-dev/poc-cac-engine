@@ -84,8 +84,6 @@ export async function saveOutput(prisma: Prisma.TransactionClient, output: Formu
   VALUES${sqlValues}
   ON CONFLICT("serieName","date") DO UPDATE SET "number" = excluded."number";`;
 
-  console.log(sql);
-
   await prisma.$executeRaw(new Sql([sql], []));
 }
 

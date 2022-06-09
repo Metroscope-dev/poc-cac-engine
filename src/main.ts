@@ -1,3 +1,4 @@
+import { startComputationTaskRequester } from "./cacAutoComplete";
 import {
   createComputedSerie,
   createSerie,
@@ -6,8 +7,12 @@ import {
   updateValue,
   resetAll,
 } from "./domain";
+import { startComputationTaskRunner } from "./taskRunner";
 
 export async function main() {
+  startComputationTaskRequester();
+  startComputationTaskRunner();
+
   await resetAll();
   await createUser("toto", "reportSettings1");
   await createSerie("serie1", "A brand new Serie.");

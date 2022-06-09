@@ -154,3 +154,10 @@ export class ReportComputation extends Computation<
   compute = report.computeReport;
   saveOutput = report.saveOutput;
 }
+
+export function computationConstructorOf(computationName: string): Computation<Scope, any, any> {
+  if (computationName === FormulaComputation.name) return FormulaComputation;
+  else if (computationName === StatsComputation.name) return StatsComputation;
+  else if (computationName === ReportComputation.name) return ReportComputation;
+  else throw new Error(`Missing binding for computation '${computationName}'.`);
+}
