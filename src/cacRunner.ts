@@ -1,4 +1,5 @@
-import { Computation, computationError, computationSuccess, Scope } from "./cacEngine";
+import { Computation, Scope } from "./cacBase";
+import { computationError, computationSuccess } from "./cacEngine";
 
 export type ComputationRequest<T extends Scope, Input, Output> = {
   computation: Computation<T, Input, Output>;

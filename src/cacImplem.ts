@@ -2,7 +2,8 @@ import * as formula from "./computeFormula";
 import * as stats from "./computeStats";
 import * as report from "./computeReport";
 import { Prisma } from "@prisma/client";
-import { Computation, BatchOperation, Scope } from "./cacEngine";
+import { Computation, BatchOperation, Scope } from "./cacBase";
+import { registeredComputations } from "./cacEngine";
 
 export class UserSettingsChanged extends BatchOperation<{ userName: string }> {
   impactedComputations = [ReportComputation];
@@ -155,9 +156,6 @@ export class ReportComputation extends Computation<
   saveOutput = report.saveOutput;
 }
 
-export function computationConstructorOf(computationName: string): Computation<Scope, any, any> {
-  if (computationName === FormulaComputation.name) return FormulaComputation;
-  else if (computationName === StatsComputation.name) return StatsComputation;
-  else if (computationName === ReportComputation.name) return ReportComputation;
-  else throw new Error(`Missing binding for computation '${computationName}'.`);
-}
+registeredComputations[FormulaComputation.name] = FormulaComputation;
+registeredComputations[StatsComputation.name] = StatsComputation;
+registeredComputations[ReportComputation.name] = ReportComputation;
