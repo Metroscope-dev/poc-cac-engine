@@ -13,3 +13,12 @@ yarn docker:up
 yarn start
 yarn docker:down
 ```
+
+You can visualize the DB directly using the provided pgAdmin container.
+
+```
+http://localhost:5050/
+login : root@metroscope.tech
+pwd : root
+dbPwd : root
+```

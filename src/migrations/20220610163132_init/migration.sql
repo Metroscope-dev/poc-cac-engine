@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "Progress" AS ENUM ('WAITING', 'RUNNING', 'ERROR', 'SUCCESS');
+CREATE TYPE "Progress" AS ENUM ('WAITING', 'RUNNING', 'ERROR', 'SUCCESS', 'CANCELED');
 
 -- CreateTable
 CREATE TABLE "user" (

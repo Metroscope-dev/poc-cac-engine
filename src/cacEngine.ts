@@ -43,7 +43,9 @@ export async function cascades(
         if (childEvent) await cascade(prisma, childEvent, depth + 1);
         if (depth === 1) {
           log(depth, computation, scope, "Requesting computation");
-          await requestComputationTask(prisma, computation, scope);
+          await dbUpsertComputationTask(prisma, computation, scope, Progress.WAITING, null);
+        } else {
+          await dbUpdateComputationTask(prisma, computation, scope, Progress.CANCELED, null);
         }
       }
     }
@@ -65,14 +67,6 @@ function logOp(depth: number, batchOperation: ChangeEvent<Scope>, message: strin
 
 function indent(depth: number) {
   return "\t".repeat(depth);
-}
-
-async function requestComputationTask(
-  prisma: Prisma.TransactionClient,
-  computation: Computation<Scope, any, any>,
-  scope: Scope
-) {
-  await dbUpsertComputationTask(prisma, computation, scope, Progress.WAITING, null);
 }
 
 export async function findExistingComputationTask(
@@ -112,6 +106,26 @@ export async function dbUpsertComputationTask(
         ...serializedScope,
         computationName: computation.constructor.name,
       },
+    },
+  });
+}
+
+export async function dbUpdateComputationTask(
+  prisma: Prisma.TransactionClient,
+  computation: Computation<Scope, any, any>,
+  scope: Scope,
+  progress: Progress,
+  inputHash: string | null
+) {
+  const serializedScope = serializeScope(scope);
+  await prisma.computationTask.updateMany({
+    data: {
+      progress,
+      inputHash,
+    },
+    where: {
+      ...serializedScope,
+      computationName: computation.constructor.name,
     },
   });
 }

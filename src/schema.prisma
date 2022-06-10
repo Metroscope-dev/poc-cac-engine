@@ -92,6 +92,7 @@ enum Progress {
   RUNNING
   ERROR
   SUCCESS
+  CANCELED
 }
 
 model ComputationTask {
