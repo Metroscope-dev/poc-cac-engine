@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { cascade } from "./cacEngine";
+import { cascade, cascades } from "./cacEngine";
 import {
   ComputedSerieFormulaChanged,
   UserSettingsChanged,
@@ -47,16 +47,16 @@ export async function createSerie(serieName: string, description: string) {
 }
 
 export async function createValues(serieName: string, values: { date: Date; number: number }[]) {
-  const scope = { serieName, dates: values.map(v => v.date) };
-  const operation = new ValueNumberChanged(scope, "create");
+  const scopes = values.map(v => ({ serieName, date: v.date }));
+  const operations = scopes.map(scope => new ValueNumberChanged(scope, "create"));
   return prisma.$transaction(async prisma => {
     await db.createValues(prisma, serieName, values);
-    await cascade(prisma, operation);
+    await cascades(prisma, operations);
   });
 }
 
 export async function createValue(serieName: string, date: Date, number: number) {
-  const operation = new ValueNumberChanged({ serieName, dates: [date] }, "create");
+  const operation = new ValueNumberChanged({ serieName, date }, "create");
   return prisma.$transaction(async prisma => {
     await db.createValue(prisma, serieName, date, number);
     await cascade(prisma, operation);
@@ -64,7 +64,7 @@ export async function createValue(serieName: string, date: Date, number: number)
 }
 
 export async function updateValue(serieName: string, date: Date, number: number) {
-  const operation = new ValueNumberChanged({ serieName, dates: [date] }, "update");
+  const operation = new ValueNumberChanged({ serieName, date }, "update");
   return prisma.$transaction(async prisma => {
     await db.updateValue(prisma, serieName, date, number);
     await cascade(prisma, operation);
@@ -72,7 +72,7 @@ export async function updateValue(serieName: string, date: Date, number: number)
 }
 
 export async function deleteValue(serieName: string, date: Date) {
-  const operation = new ValueNumberChanged({ serieName, dates: [date] }, "delete");
+  const operation = new ValueNumberChanged({ serieName, date }, "delete");
   return prisma.$transaction(async prisma => {
     await db.deleteValue(prisma, serieName, date);
     await cascade(prisma, operation);

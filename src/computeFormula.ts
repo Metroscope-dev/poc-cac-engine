@@ -5,38 +5,36 @@ export type FormulaInput = {
   serieName: string;
   formula: string;
   childSerieNames: string[];
-  dates: Date[];
-  numbersByDateByChildSerie: {
-    [key: string]: {
-      [key: string]: number;
-    };
+  date: Date;
+  numbersByChildSerie: {
+    [key: string]: number;
   };
 };
 
 export type FormulaOutput = {
   serieName: string;
-  values: { [isoDate: string]: number };
+  date: Date;
+  value: number;
 };
 
 export async function computeFormula(input: FormulaInput): Promise<FormulaOutput> {
-  const values: { [key: string]: number } = {};
-  for (const date of input.dates) {
-    values[date.toISOString()] = 0;
-    for (const childSerieName of input.childSerieNames) {
-      values[date.toISOString()] +=
-        input.numbersByDateByChildSerie[childSerieName]?.[date.toISOString()] ?? 0;
-    }
+  let sum = 0;
+
+  for (const childSerieName of input.childSerieNames) {
+    sum += input.numbersByChildSerie[childSerieName] ?? 0;
   }
+
   return {
     serieName: input.serieName,
-    values,
+    date: input.date,
+    value: sum,
   };
 }
 
 export async function findInput(
   prisma: Prisma.TransactionClient,
   serieName: string,
-  dates: Date[]
+  date: Date
 ): Promise<FormulaInput> {
   const computedSerie = await prisma.computedSerie.findUnique({
     where: {
@@ -44,46 +42,65 @@ export async function findInput(
     },
   });
   if (!computedSerie)
-    throw new Error(`Cannot compute formula for missing computeSerie ${serieName}.`);
+    throw new Error(`Cannot compute formula for missing computedSerie ${serieName}.`);
 
   const childSerieNames = findSerieNames(computedSerie.formula);
 
-  const numbersByDateByChildSerie: { [key: string]: { [key: string]: number } } = {};
+  const numbersByChildSerie: { [key: string]: number } = {};
   for (const childSerieName of childSerieNames) {
-    const childSerieValues = await prisma.value.findMany({
+    const value = await prisma.value.findUnique({
       where: {
-        serieName: childSerieName,
-        date: {
-          in: dates,
+        date_serieName: {
+          serieName: childSerieName,
+          date,
         },
       },
     });
-    if (childSerieValues.length < dates.length)
-      throw new Error(`Some date are missing for childSerie ${childSerieName}.`);
-    const numbersByDate = childSerieValues.reduce<{ [key: string]: number }>((acc, next) => {
-      acc[next.date.toISOString()] = next.number;
-      return acc;
-    }, {});
-    numbersByDateByChildSerie[childSerieName] = numbersByDate;
+    if (!value)
+      throw new Error(
+        `Cannot compute formula for ComputeSerie ${serieName} because not value found for dependant Serie ${childSerieName} at date ${date}.`
+      );
+    numbersByChildSerie[childSerieName] = value?.number;
   }
   return {
     serieName,
+    date,
     formula: computedSerie.formula,
     childSerieNames,
-    dates,
-    numbersByDateByChildSerie,
+    numbersByChildSerie,
   };
 }
 
 export async function saveOutput(prisma: Prisma.TransactionClient, output: FormulaOutput) {
-  const sqlValues = Object.keys(output.values)
-    .map(isoDate => `('${output.serieName}','${isoDate}',${output.values[isoDate]})`)
+  await prisma.value.upsert({
+    where: {
+      date_serieName: {
+        serieName: output.serieName,
+        date: output.date,
+      },
+    },
+    create: {
+      serieName: output.serieName,
+      date: output.date,
+      number: output.value,
+      outdatedAt: null,
+    },
+    update: {
+      number: output.value,
+      outdatedAt: null,
+    },
+  });
+}
+
+export async function saveOutputs(prisma: Prisma.TransactionClient, outputs: FormulaOutput[]) {
+  const sqlValues = outputs
+    .map(output => `('${output.serieName}','${output.date}',${output.value})`)
     .join(",");
 
   const sql = `INSERT INTO "value"("serieName","date","number") 
   VALUES${sqlValues}
   ON CONFLICT("serieName","date") DO UPDATE SET "number" = excluded."number";`;
-
+  console.log(sql);
   await prisma.$executeRaw(new Sql([sql], []));
 }
 

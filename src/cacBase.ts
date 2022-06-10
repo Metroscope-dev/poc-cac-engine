@@ -9,7 +9,7 @@ export type OperationType = "create" | "update" | "delete";
 export type Scope = {
   userName?: string;
   serieName?: string;
-  dates?: Date[];
+  date?: Date;
 };
 
 /** A batch change of some properties within a collection of Entity.*/

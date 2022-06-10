@@ -96,7 +96,7 @@ enum Progress {
 }
 
 model ComputationTask {
-  dates           String
+  date            String
   serieName       String
   userName        String
   computationName String
@@ -106,6 +106,6 @@ model ComputationTask {
   progress   Progress  @default(WAITING)
   updatedAt  DateTime  @updatedAt
 
-  @@id([userName, serieName, dates, computationName])
+  @@id([userName, serieName, date, computationName])
   @@map("computation_task")
 }

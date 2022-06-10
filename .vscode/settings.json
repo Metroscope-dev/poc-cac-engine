@@ -37,5 +37,12 @@
     "onSave": "test-file",
     "onStartup": ["all-tests"]
   },
-  "window.title": "${activeEditorMedium}${separator}${rootName}"
+  "window.title": "${activeEditorMedium}${separator}${rootName}",
+  "highlight.regexes": {
+    "((console\\.)?(log|logOp|warn|error)\\(.+\\)[;]?)": {
+      "regexFlags": "gm",
+      "decorations": [{ "opacity": "0.1" }]
+    }
+  },
+  "highlight.regexFlags": "gi"
 }

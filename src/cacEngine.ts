@@ -14,45 +14,52 @@ export async function cascade(
   operation: BatchOperation<Scope>,
   depth = 1
 ) {
-  console.log(`${indent(depth)}Cascading ${operation.description()}`);
-  const computations = operation.impactedComputations.map(
-    computationConstructor => new computationConstructor(operation.scope, operation.type)
-  );
-  console.log(`${indent(depth)}\t${computations.length} impacted computations.`);
+  return await cascades(prisma, [operation], depth);
+}
 
-  const outdatedAt = new Date();
-  for (const computation of computations) {
-    const scopes = await computation.computeScopes(prisma, operation.scope);
-    console.log(
-      `${indent(depth)}\t${computation.constructor.name}: ${JSON.stringify(
-        operation.scope
-      )} => ${JSON.stringify(scopes)}.`
+export async function cascades(
+  prisma: Prisma.TransactionClient,
+  operations: BatchOperation<Scope>[],
+  depth = 1
+) {
+  for (const operation of operations) {
+    logOp(depth, operation, "Cascading");
+    const computations = operation.impactedComputations.map(
+      computationConstructor => new computationConstructor(operation.scope, operation.type)
     );
-    for (const scope of scopes) {
-      console.log(
-        `${indent(depth)}\t${
-          computation.constructor.name
-        }: Outdating computation db entries ${computation.taskDescription(scope)}.`
-      );
-      await outdateComputationTask(prisma, computation, scope, outdatedAt);
-      console.log(
-        `${indent(depth)}\t${
-          computation.constructor.name
-        }: Outdating computedEntity db entries ${computation.taskDescription(scope)}.`
-      );
-      await computation.outdateExistingComputedEntity(prisma, scope, outdatedAt);
-      const childOperation = new computation.computedEntityOperation(scope, "delete");
-      if (childOperation) await cascade(prisma, childOperation, depth + 1);
-      if (depth === 1) {
-        console.log(
-          `${indent(depth)}\t${
-            computation.constructor.name
-          }: Requesting computation for ${computation.taskDescription(scope)}`
-        );
-        await requestComputationTask(prisma, computation, scope);
+    console.log(`${indent(depth)}\t${computations.length} impacted computations.`);
+
+    const outdatedAt = new Date();
+    for (const computation of computations) {
+      const scopes = await computation.computeScopes(prisma, operation.scope);
+      logOp(depth, operation, `${JSON.stringify(operation.scope)} => ${JSON.stringify(scopes)}.`);
+      for (const scope of scopes) {
+        log(depth, computation, scope, "Outdating computationTask in DB");
+        await outdateComputationTask(prisma, computation, scope, outdatedAt);
+        log(depth, computation, scope, "Outdating ComputedEntity in DB");
+        await computation.outdateExistingComputedEntity(prisma, scope, outdatedAt);
+        const childOperation = new computation.computedEntityOperation(scope, "delete");
+        if (childOperation) await cascade(prisma, childOperation, depth + 1);
+        if (depth === 1) {
+          log(depth, computation, scope, "Requesting computation");
+          await requestComputationTask(prisma, computation, scope);
+        }
       }
     }
   }
+}
+
+function log(
+  depth: number,
+  computation: Computation<Scope, any, any>,
+  scope: Scope,
+  message: string
+) {
+  console.log(`${indent(depth)}\t${computation.taskDescription(scope)}: ${message}`);
+}
+
+function logOp(depth: number, batchOperation: BatchOperation<Scope>, message: string) {
+  console.log(`${indent(depth)}\t${batchOperation.description()}: ${message}`);
 }
 
 function indent(depth: number) {
@@ -112,7 +119,7 @@ export async function dbUpsertComputationTask(
       inputHash,
     },
     where: {
-      userName_serieName_dates_computationName: {
+      userName_serieName_date_computationName: {
         ...serializedScope,
         computationName: computation.constructor.name,
       },
@@ -128,8 +135,6 @@ export async function computationSuccess<Output>(
 ) {
   return await prisma.$transaction(async prisma => {
     await computation.saveOutput(prisma, output);
-    //TODO on doit check le hash d'origine qui revient avec l'output
-    //et s'en servir comme d'un optimistic lock
     const existingTask = await findExistingComputationTask(prisma, computation, scope);
     if (existingTask?.inputHash !== inputHash) {
       return false;
@@ -154,7 +159,7 @@ export function unserializeScope(task: ComputationTask) {
   const scope: Scope = {
     userName: task.userName === "*" ? undefined : task.userName,
     serieName: task.serieName === "*" ? undefined : task.serieName,
-    dates: task.dates === "*" ? undefined : parseJsonDates(task.dates),
+    date: task.date === "*" ? undefined : new Date(task.date),
   };
   return scope;
 }
@@ -163,13 +168,8 @@ function serializeScope(scope: Scope) {
   return {
     userName: scope.userName ?? "*",
     serieName: scope.serieName ?? "*",
-    dates: scope.dates ? stringify(scope.dates) : "*",
+    date: scope.date ? scope.date.toISOString() : "*",
   };
-}
-
-function parseJsonDates(dates: string) {
-  const stringDates = JSON.parse(dates) as string[];
-  return stringDates.map(d => new Date(d));
 }
 
 async function computationTasksRequester() {

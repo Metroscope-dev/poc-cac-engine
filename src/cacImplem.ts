@@ -26,7 +26,7 @@ export class ReportContentChanged extends BatchOperation<ReportScope> {
   impactedComputations = [];
 }
 
-export type FormulaScope = { serieName: string; dates: Date[] };
+export type FormulaScope = { serieName: string; date: Date };
 export class FormulaComputation extends Computation<
   FormulaScope,
   formula.FormulaInput,
@@ -41,9 +41,7 @@ export class FormulaComputation extends Computation<
   ) => {
     await prisma.value.updateMany({
       where: {
-        date: {
-          in: scope.dates,
-        },
+        date: scope.date,
         serieName: scope.serieName,
       },
       data: {
@@ -52,25 +50,23 @@ export class FormulaComputation extends Computation<
     });
   };
   findInput = async (prisma: Prisma.TransactionClient, scope: FormulaScope) => {
-    return formula.findInput(prisma, scope.serieName, scope.dates);
+    return formula.findInput(prisma, scope.serieName, scope.date);
   };
   saveOutput = formula.saveOutput;
   computeScopes = async (prisma: Prisma.TransactionClient, scope: Scope) => {
     const serieName = scope.serieName;
     if (!serieName) throw new Error("serieName is mandatory in FormulaScope");
-    let dates: Date[] = scope.dates ?? [];
-    if (!dates) {
-      dates = (
-        await prisma.value.findMany({
-          where: {
-            serieName: scope.serieName,
-          },
-          select: {
-            date: true,
-          },
-        })
-      ).map(o => o.date);
-    }
+    const dates = (
+      await prisma.value.findMany({
+        where: {
+          serieName: scope.serieName,
+        },
+        select: {
+          date: true,
+        },
+      })
+    ).map(o => o.date);
+
     const computedSeries = await prisma.computedSerie.findMany({
       where: {
         dependingOnSerieName: serieName,
@@ -79,7 +75,10 @@ export class FormulaComputation extends Computation<
         serieName: true,
       },
     });
-    return computedSeries.map(cs => ({ dates, ...cs }));
+    const scopes = computedSeries.flatMap(cs =>
+      dates.map(date => ({ serieName: cs.serieName, date }))
+    );
+    return scopes;
   };
   compute = formula.computeFormula;
 }
