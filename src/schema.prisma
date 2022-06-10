@@ -9,6 +9,10 @@ generator client {
   binaryTargets   = ["native", "linux-musl"]
 }
 
+generator erd {
+  provider = "prisma-erd-generator"
+}
+
 model User {
   name String @id
 
