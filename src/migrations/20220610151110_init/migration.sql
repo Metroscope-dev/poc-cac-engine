@@ -1,5 +1,5 @@
 -- CreateEnum
-CREATE TYPE "Progress" AS ENUM ('WAITING', 'RUNNING', 'ERROR', 'SUCCESS', 'OUTDATED');
+CREATE TYPE "Progress" AS ENUM ('WAITING', 'RUNNING', 'ERROR', 'SUCCESS');
 
 -- CreateTable
 CREATE TABLE "user" (
@@ -60,7 +60,6 @@ CREATE TABLE "computation_task" (
     "userName" TEXT NOT NULL,
     "computationName" TEXT NOT NULL,
     "inputHash" TEXT,
-    "outdatedAt" TIMESTAMP(3),
     "progress" "Progress" NOT NULL DEFAULT E'WAITING',
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

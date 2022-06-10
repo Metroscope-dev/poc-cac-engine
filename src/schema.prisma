@@ -92,7 +92,6 @@ enum Progress {
   RUNNING
   ERROR
   SUCCESS
-  OUTDATED
 }
 
 model ComputationTask {
@@ -101,10 +100,9 @@ model ComputationTask {
   userName        String
   computationName String
 
-  inputHash  String?
-  outdatedAt DateTime?
-  progress   Progress  @default(WAITING)
-  updatedAt  DateTime  @updatedAt
+  inputHash String?
+  progress  Progress @default(WAITING)
+  updatedAt DateTime @updatedAt
 
   @@id([userName, serieName, date, computationName])
   @@map("computation_task")

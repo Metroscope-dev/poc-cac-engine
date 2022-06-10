@@ -1,45 +1,46 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { ComputationTask, Prisma, PrismaClient, Progress } from "@prisma/client";
 import * as crypto from "crypto";
 import stringify from "fast-json-stable-stringify";
 import { startComputationTaskRunner, waitingComputationTasks } from "./cacRunner";
-import { Computation, BatchOperation, Scope } from "./cacBase";
+import { Computation, ChangeEvent, Scope } from "./cacBase";
 
 const prisma = new PrismaClient();
 
-export const registeredComputations: { [computationName: string]: Computation<Scope, any, any> } =
-  {};
+export const registeredComputations: {
+  [computationName: string]: Computation<Scope, any, any>;
+} = {};
 
 export async function cascade(
   prisma: Prisma.TransactionClient,
-  operation: BatchOperation<Scope>,
+  event: ChangeEvent<Scope>,
   depth = 1
 ) {
-  return await cascades(prisma, [operation], depth);
+  return await cascades(prisma, [event], depth);
 }
 
 export async function cascades(
   prisma: Prisma.TransactionClient,
-  operations: BatchOperation<Scope>[],
+  events: ChangeEvent<Scope>[],
   depth = 1
 ) {
-  for (const operation of operations) {
-    logOp(depth, operation, "Cascading");
-    const computations = operation.impactedComputations.map(
-      computationConstructor => new computationConstructor(operation.scope, operation.type)
+  for (const event of events) {
+    logOp(depth, event, "Cascading");
+    const computations = event.impactedComputations.map(
+      computationConstructor =>
+        new computationConstructor(event.scope, event.changeType) as Computation<Scope, any, any>
     );
     console.log(`${indent(depth)}\t${computations.length} impacted computations.`);
 
     const outdatedAt = new Date();
     for (const computation of computations) {
-      const scopes = await computation.computeScopes(prisma, operation.scope);
-      logOp(depth, operation, `${JSON.stringify(operation.scope)} => ${JSON.stringify(scopes)}.`);
+      const scopes = await computation.computeScopes(prisma, event.scope);
+      logOp(depth, event, `${JSON.stringify(event.scope)} => ${JSON.stringify(scopes)}.`);
       for (const scope of scopes) {
-        log(depth, computation, scope, "Outdating computationTask in DB");
-        await outdateComputationTask(prisma, computation, scope, outdatedAt);
         log(depth, computation, scope, "Outdating ComputedEntity in DB");
         await computation.outdateExistingComputedEntity(prisma, scope, outdatedAt);
-        const childOperation = new computation.computedEntityOperation(scope, "delete");
-        if (childOperation) await cascade(prisma, childOperation, depth + 1);
+        const childEvent = new computation.createOutputChangeEvent(scope, "delete");
+        if (childEvent) await cascade(prisma, childEvent, depth + 1);
         if (depth === 1) {
           log(depth, computation, scope, "Requesting computation");
           await requestComputationTask(prisma, computation, scope);
@@ -58,7 +59,7 @@ function log(
   console.log(`${indent(depth)}\t${computation.taskDescription(scope)}: ${message}`);
 }
 
-function logOp(depth: number, batchOperation: BatchOperation<Scope>, message: string) {
+function logOp(depth: number, batchOperation: ChangeEvent<Scope>, message: string) {
   console.log(`${indent(depth)}\t${batchOperation.description()}: ${message}`);
 }
 
@@ -66,21 +67,12 @@ function indent(depth: number) {
   return "\t".repeat(depth);
 }
 
-async function outdateComputationTask(
-  prisma: Prisma.TransactionClient,
-  computation: Computation<Scope, any, any>,
-  scope: Scope,
-  outdatedAt: Date
-) {
-  await dbUpsertComputationTask(prisma, computation, scope, outdatedAt, Progress.OUTDATED, null);
-}
-
 async function requestComputationTask(
   prisma: Prisma.TransactionClient,
   computation: Computation<Scope, any, any>,
   scope: Scope
 ) {
-  await dbUpsertComputationTask(prisma, computation, scope, null, Progress.WAITING, null);
+  await dbUpsertComputationTask(prisma, computation, scope, Progress.WAITING, null);
 }
 
 export async function findExistingComputationTask(
@@ -100,7 +92,6 @@ export async function dbUpsertComputationTask(
   prisma: Prisma.TransactionClient,
   computation: Computation<Scope, any, any>,
   scope: Scope,
-  outdatedAt: Date | null,
   progress: Progress,
   inputHash: string | null
 ) {
@@ -109,12 +100,10 @@ export async function dbUpsertComputationTask(
     create: {
       ...serializedScope,
       computationName: computation.constructor.name,
-      outdatedAt,
       progress,
       inputHash,
     },
     update: {
-      outdatedAt,
       progress,
       inputHash,
     },
@@ -139,8 +128,8 @@ export async function computationSuccess<Output>(
     if (existingTask?.inputHash !== inputHash) {
       return false;
     }
-    await dbUpsertComputationTask(prisma, computation, scope, null, Progress.SUCCESS, inputHash);
-    await cascade(prisma, new computation.computedEntityOperation(scope, "created"));
+    await dbUpsertComputationTask(prisma, computation, scope, Progress.SUCCESS, inputHash);
+    await cascade(prisma, new computation.createOutputChangeEvent(scope, "created"));
     return true;
   });
 }
@@ -151,7 +140,7 @@ export async function computationError(
   inputHash: string,
   error: unknown
 ) {
-  await dbUpsertComputationTask(prisma, computation, scope, new Date(), Progress.ERROR, inputHash);
+  await dbUpsertComputationTask(prisma, computation, scope, Progress.ERROR, inputHash);
   console.error(`Computation failed for task ${computation.taskDescription(scope)}.`, error);
 }
 
@@ -189,18 +178,17 @@ async function computationTasksRequester() {
     if (!computationConstructor)
       throw new Error(`No Computation registered for name '${task.computationName}'`);
     const scope: Scope = unserializeScope(task);
-    const computation = new computationConstructor(scope, "create");
-
+    const computation = new computationConstructor(scope, "create") as Computation<Scope, any, any>;
     console.log(`-- BEGIN ${computation.taskDescription(scope)} starting.`);
-
     const input = await computation.findInput(prisma, scope);
     const inputHash = hash(input);
     const existingTask = await findExistingComputationTask(prisma, computation, scope);
     if (existingTask && existingTask.inputHash === inputHash) {
-      await dbUpsertComputationTask(prisma, computation, scope, null, Progress.SUCCESS, inputHash);
+      await dbUpsertComputationTask(prisma, computation, scope, Progress.SUCCESS, inputHash);
+      await computation.restoreExistingComputedEntity(prisma, scope);
       console.log(`-- SKIPPED (hash unchanged) ${computation.taskDescription(scope)}.`);
     } else {
-      await dbUpsertComputationTask(prisma, computation, scope, null, Progress.RUNNING, inputHash);
+      await dbUpsertComputationTask(prisma, computation, scope, Progress.RUNNING, inputHash);
       waitingComputationTasks.push({
         computation,
         scope,

@@ -2,27 +2,27 @@ import * as formula from "./computeFormula";
 import * as stats from "./computeStats";
 import * as report from "./computeReport";
 import { Prisma } from "@prisma/client";
-import { Computation, BatchOperation, Scope } from "./cacBase";
+import { Computation, ChangeEvent, Scope } from "./cacBase";
 import { registeredComputations } from "./cacEngine";
 
-export class UserSettingsChanged extends BatchOperation<{ userName: string }> {
+export class UserSettingsChanged extends ChangeEvent<{ userName: string }> {
   impactedComputations = [ReportComputation];
 }
-export class ComputedSerieFormulaChanged extends BatchOperation<{
+export class ComputedSerieFormulaChanged extends ChangeEvent<{
   serieName: string;
 }> {
   impactedComputations = [FormulaComputation];
 }
 
-export class ValueNumberChanged extends BatchOperation<FormulaScope> {
+export class ValueNumberChanged extends ChangeEvent<FormulaScope> {
   impactedComputations = [FormulaComputation, StatsComputation];
 }
 
-export class StatsCountChanged extends BatchOperation<StatsScope> {
+export class StatsCountChanged extends ChangeEvent<StatsScope> {
   impactedComputations = [ReportComputation];
 }
 
-export class ReportContentChanged extends BatchOperation<ReportScope> {
+export class ReportContentChanged extends ChangeEvent<ReportScope> {
   impactedComputations = [];
 }
 
@@ -33,11 +33,11 @@ export class FormulaComputation extends Computation<
   formula.FormulaOutput
 > {
   computationName = "formula";
-  computedEntityOperation = ValueNumberChanged;
+  createOutputChangeEvent = ValueNumberChanged;
   outdateExistingComputedEntity = async (
     prisma: Prisma.TransactionClient,
     scope: FormulaScope,
-    outdatedAt: Date
+    outdatedAt: Date | null
   ) => {
     await prisma.value.updateMany({
       where: {
@@ -85,11 +85,11 @@ export class FormulaComputation extends Computation<
 export type StatsScope = { serieName: string };
 export class StatsComputation extends Computation<StatsScope, stats.StatsInput, stats.StatsOutput> {
   computationName = "stats";
-  computedEntityOperation = StatsCountChanged;
+  createOutputChangeEvent = StatsCountChanged;
   outdateExistingComputedEntity = async (
     prisma: Prisma.TransactionClient,
     scope: StatsScope,
-    outdatedAt: Date
+    outdatedAt: Date | null
   ) => {
     await prisma.stats.updateMany({
       where: {
@@ -117,11 +117,11 @@ export class ReportComputation extends Computation<
   report.ReportOutput
 > {
   computationName = "report";
-  computedEntityOperation = ReportContentChanged;
+  createOutputChangeEvent = ReportContentChanged;
   outdateExistingComputedEntity = async (
     prisma: Prisma.TransactionClient,
     scope: ReportScope,
-    outdatedAt: Date
+    outdatedAt: Date | null
   ) => {
     await prisma.report.updateMany({
       where: {

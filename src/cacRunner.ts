@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Computation, Scope } from "./cacBase";
 import { computationError, computationSuccess } from "./cacEngine";
 

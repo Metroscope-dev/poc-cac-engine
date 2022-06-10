@@ -1,5 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { Prisma } from "@prisma/client";
-export type OperationType = "create" | "update" | "delete";
+export type ChangeType = "create" | "update" | "delete";
 
 /**
  * A Scope is a composite key for uniquely identifying a collection of a given entity type.
@@ -13,14 +14,14 @@ export type Scope = {
 };
 
 /** A batch change of some properties within a collection of Entity.*/
-export abstract class BatchOperation<T extends Scope> {
+export abstract class ChangeEvent<T extends Scope> {
   scope: T;
-  /** The Computations that are impacted by this Operation */
+  /** The Computations that are impacted by this Event */
   abstract impactedComputations: Computation<Scope, any, any>["constructor"][];
-  type: OperationType;
-  constructor(scope: T, type: OperationType) {
+  changeType: ChangeType;
+  constructor(scope: T, changeType: ChangeType) {
     this.scope = scope;
-    this.type = type;
+    this.changeType = changeType;
   }
   description() {
     return `${this.constructor.name}[${JSON.stringify(this.scope)}]`;
@@ -31,7 +32,7 @@ export abstract class BatchOperation<T extends Scope> {
  * A computation has a fixed scope.
  */
 export abstract class Computation<ComputationScope extends Scope, Input, Output> {
-  /** Compute the list of ComputationScope that are resolved from the Scope of triggering operation  */
+  /** Compute the list of ComputationScope that are resolved from the Scope of triggering event  */
   abstract computeScopes: (
     prisma: Prisma.TransactionClient,
     scopeRequest: Scope
@@ -42,14 +43,18 @@ export abstract class Computation<ComputationScope extends Scope, Input, Output>
   abstract compute: (input: Input) => Promise<Output>;
   /** Save the output to the DB */
   abstract saveOutput: (prisma: Prisma.TransactionClient, output: Output) => Promise<void>;
-  /** The operation that should be emitted when the computation is done */
-  abstract computedEntityOperation: BatchOperation<ComputationScope>["constructor"];
+  /** The event that should be emitted when the computation is done */
+  abstract createOutputChangeEvent: ChangeEvent<Scope>["constructor"];
   /** Mark the existing ComputedEntity as outdated */
-  abstract outdateExistingComputedEntity: (
+  abstract outdateExistingComputedEntity(
     prisma: Prisma.TransactionClient,
     scope: ComputationScope,
-    outdatedAt: Date
-  ) => Promise<void>;
+    outdatedAt: Date | null
+  ): Promise<void>;
+
+  async restoreExistingComputedEntity(prisma: Prisma.TransactionClient, scope: ComputationScope) {
+    return this.outdateExistingComputedEntity(prisma, scope, null);
+  }
 
   /** Returns a short string for logging computation tasks*/
   taskDescription(scope: ComputationScope | undefined) {
